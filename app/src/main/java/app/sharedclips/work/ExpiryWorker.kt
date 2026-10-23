@@ -1,5 +1,6 @@
 package app.sharedclips.work
 
+import android.content.ContentUris
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -20,24 +21,34 @@ class ExpiryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val days = settings.deleteAfterDays
         if (days <= 0) return Result.success()
 
+        val cutoff = inputData.getLong(KEY_CUTOFF_SEC, 0).takeIf { it > 0 } ?: cutoffSec(days)
         val scanner = MediaStoreScanner(applicationContext)
-        val uris = scanner.findExpired(cutoffSec(days)).map { it.uri }
-        if (uris.isEmpty()) return Result.success()
+        val expired = scanner.findExpired(cutoff)
+        if (expired.isEmpty()) {
+            Notifications.cancelDeletePrompt(applicationContext)
+            return Result.success()
+        }
 
         // Without All files access a background job cannot trash other apps' files; the notification asks.
         val mover = MediaMover(applicationContext)
-        if (mover.hasAllFilesAccess()) mover.trashDirectly(uris)
-        val left = scanner.countExisting(uris)
-        if (left > 0) Notifications.showDeletePrompt(applicationContext, left, days)
-        ActivityLog.add(
-            applicationContext,
-            "Auto-delete: ${uris.size} older than $days days, ${uris.size - left} trashed" +
-                if (left > 0) ", $left left -> notification" else "",
-        )
+        val uris = expired.map { it.uri }
+        val trashed = if (mover.hasAllFilesAccess()) mover.trashDirectly(uris) else 0
+        val log = StringBuilder("Auto-delete: ${uris.size} older than ${Notifications.dayCount(days)}, $trashed trashed")
+        val left = scanner.inTikTokDownloads(expired.map { it.id })
+        if (left.isNotEmpty()) {
+            val result = Notifications.showDeletePrompt(applicationContext, left.map { ContentUris.parseId(it) }, days)
+            log.append(", ${left.size} left ${result.log}")
+        } else {
+            Notifications.cancelDeletePrompt(applicationContext)
+        }
+        ActivityLog.add(applicationContext, log.toString())
         return Result.success()
     }
 
     companion object {
+        /** Test hook: the cutoff (epoch seconds) to use instead of now minus N days. */
+        const val KEY_CUTOFF_SEC = "cutoff_sec"
+
         fun cutoffSec(days: Int): Long =
             TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) - TimeUnit.DAYS.toSeconds(days.toLong())
     }

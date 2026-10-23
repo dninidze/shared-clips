@@ -49,4 +49,28 @@ class SettlePolicyTest {
     fun farFutureTimeIsNotAWriteInProgress() {
         assertTrue(SettlePolicy.isSettled(now + 3_600_000, size, now))
     }
+
+    @Test
+    fun emptyEntryIsWaitedForAtFirst() {
+        // TikTok's empty entry before the copy starts: still a save in progress.
+        assertFalse(SettlePolicy.isAbandoned(0, now - 20_000, now))
+        assertFalse(SettlePolicy.isAbandoned(0, now - SettlePolicy.ABANDONED_AFTER_MS + 1, now))
+    }
+
+    @Test
+    fun emptyEntryIsAbandonedAfterTheLimit() {
+        assertTrue(SettlePolicy.isAbandoned(0, now - SettlePolicy.ABANDONED_AFTER_MS, now))
+        assertTrue(SettlePolicy.isAbandoned(-1, now - 86_400_000, now))
+    }
+
+    @Test
+    fun entryWithBytesIsNeverAbandoned() {
+        assertFalse(SettlePolicy.isAbandoned(size, now - 86_400_000, now))
+        assertFalse(SettlePolicy.isAbandoned(1, now - 86_400_000, now))
+    }
+
+    @Test
+    fun unknownAddedTimeIsNotAbandoned() {
+        assertFalse(SettlePolicy.isAbandoned(0, 0, now))
+    }
 }

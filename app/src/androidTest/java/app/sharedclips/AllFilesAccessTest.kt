@@ -2,10 +2,7 @@ package app.sharedclips
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import app.sharedclips.action.MediaMover
 import app.sharedclips.data.ActivityLog
-import app.sharedclips.data.MediaStoreScanner
-import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,6 +30,7 @@ class AllFilesAccessTest {
         setAutoMove(context, false)
         Device.cancelNotifications(context)
         FakeTikTok.cleanUp()
+        ActivityLog.clear(context)
     }
 
     @After
@@ -67,19 +65,19 @@ class AllFilesAccessTest {
     }
 
     @Test
-    fun autoDelete_trashesExpiredVideosWithoutARequest() {
+    fun autoDelete_trashesExpiredVideosWithoutATap() {
         val video = TestVideo(context, "expire")
         saveAndAwaitSilentMove(video, chunks = 1)
 
-        // What the daily auto-delete job does, with a cutoff that makes this video expired.
-        val scanner = MediaStoreScanner(context)
-        val expired = runBlocking { scanner.findExpired(System.currentTimeMillis() / 1000 + 60) }
-            .filter { it.displayName.startsWith(video.prefix) }
-        assertEquals(1, expired.size)
-        assertEquals(1, runBlocking { MediaMover(context).trashDirectly(expired.map { it.uri }) })
+        // The daily auto-delete job, with a cutoff that makes this video expired.
+        runExpiryWorker(context)
 
+        val log = ActivityLog.read(context).joinToString("\n")
+        assertFalse("The app posted a notification instead of deleting", Device.hasOurNotification(context))
+        assertEquals("Not in the trash:\n$log", 1, Copies.inTrash(context, video.prefix))
         assertTrue("Still on disk: ${video.monitor.report()}", video.monitor.sample().isEmpty())
         assertTrue("Still in the gallery", Copies.inMediaStore(context, video.prefix).isEmpty())
+        assertTrue("Not logged:\n$log", log.contains("Auto-delete: 1 older than 1 day, 1 trashed"))
     }
 
     /** Saves like TikTok in automatic mode and waits for the move, failing if it needed a tap. */

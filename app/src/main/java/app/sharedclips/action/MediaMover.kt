@@ -23,31 +23,19 @@ class MediaMover(private val context: Context) {
 
     /** Request to let us modify [uris]; launch it for a result, then call [moveOutOfCamera]. */
     fun writeRequest(uris: List<Uri>): PendingIntent? =
-        if (uris.isEmpty()) {
-            null // MediaStore throws on an empty request
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            MediaStore.createWriteRequest(context.contentResolver, uris)
-        } else {
-            null // Android 10: a RecoverableSecurityException per file is surfaced by moveOutOfCamera
-        }
+        // MediaStore throws on an empty request
+        if (uris.isEmpty()) null else MediaStore.createWriteRequest(context.contentResolver, uris)
 
-    /** Request moving [uris] to the system trash (recoverable for 30 days). Android 11+. */
+    /** Request moving [uris] to the system trash (recoverable for 30 days). */
     fun trashRequest(uris: List<Uri>): PendingIntent? =
-        if (uris.isEmpty()) {
-            null
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            MediaStore.createTrashRequest(context.contentResolver, uris, true)
-        } else {
-            null
-        }
+        if (uris.isEmpty()) null else MediaStore.createTrashRequest(context.contentResolver, uris, true)
 
     /** True if the user granted "Media management", so the requests above show no dialog. */
     fun canManageMedia(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && MediaStore.canManageMedia(context)
 
     /** True if the user granted "All files access": moves and deletes need no request at all. */
-    fun hasAllFilesAccess(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
+    fun hasAllFilesAccess(): Boolean = Environment.isExternalStorageManager()
 
     /**
      * Rewrites RELATIVE_PATH so files leave DCIM/Camera. Needs a granted write request or All files
@@ -65,9 +53,8 @@ class MediaMover(private val context: Context) {
             }
         }
 
-    /** Moves [uris] to the system trash without a request. Needs All files access (Android 11+). */
+    /** Moves [uris] to the system trash without a request. Needs All files access. */
     suspend fun trashDirectly(uris: List<Uri>): Int = withContext(Dispatchers.IO) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@withContext 0
         val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }
         uris.sumOf { uri ->
             try {

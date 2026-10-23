@@ -1,9 +1,12 @@
 package app.sharedclips
 
+import android.app.ActivityOptions
 import android.app.NotificationManager
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.MediaStore
@@ -12,9 +15,16 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import androidx.work.ListenableWorker
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.testing.TestListenableWorkerBuilder
+import androidx.work.workDataOf
 import app.sharedclips.action.MediaMover
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.work.CleanupScheduler
+import app.sharedclips.work.ExpiryWorker
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import java.util.regex.Pattern
@@ -35,10 +45,17 @@ object FakeTikTok {
     // NEW_TASK | MULTIPLE_TASK, so every save gets its own activity even if an earlier one is still running.
     private const val FLAGS = "0x18000000"
 
-    fun startSave(name: String, mode: String, chunks: Int = 1, gapMs: Long = 0, startDelayMs: Long = 0) {
+    fun startSave(
+        name: String,
+        mode: String,
+        chunks: Int = 1,
+        gapMs: Long = 0,
+        startDelayMs: Long = 0,
+        relativePath: String = "DCIM/Camera",
+    ) {
         Shell.run(
             "am start -W -f $FLAGS -n $COMPONENT --es name $name --es mode $mode --ei chunks $chunks " +
-                "--el gapMs $gapMs --el startDelayMs $startDelayMs"
+                "--el gapMs $gapMs --el startDelayMs $startDelayMs --es relativePath $relativePath"
         )
     }
 
@@ -107,6 +124,18 @@ object Copies {
             null,
         )?.use { c -> while (c.moveToNext()) owners += c.getString(0) }
         return owners
+    }
+
+    /** How many of the test video's gallery entries are in the system trash. */
+    fun inTrash(context: Context, prefix: String): Int {
+        val args = Bundle().apply {
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, "${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?")
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf("$prefix%"))
+            putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
+        }
+        return context.contentResolver.query(
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), arrayOf(MediaStore.Video.Media._ID), args, null
+        )?.use { it.count } ?: 0
     }
 
     /** What gallery apps see: MediaStore rows for the test video. */
@@ -189,6 +218,48 @@ object Device {
     fun hasOurNotification(context: Context): Boolean =
         context.getSystemService(NotificationManager::class.java).activeNotifications.isNotEmpty()
 
+    fun hasNotification(context: Context, id: Int): Boolean =
+        context.getSystemService(NotificationManager::class.java).activeNotifications.any { it.id == id }
+
+    /**
+     * Taps the notification the app posted: sends its own tap intent, with the ids it announced, the
+     * way the notification shade does, and removes it as auto-cancel would. Fails if Android asked
+     * for confirmation on Android 12+ (Media management and media location access are granted).
+     */
+    fun tapNotification(context: Context, id: Int) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val posted = manager.activeNotifications.firstOrNull { it.id == id } ?: error("Notification $id is not shown")
+        Log.i(TEST_TAG, "Tapping notification $id: ${posted.notification.extras.getCharSequence("android.title")}")
+        manager.cancel(id)
+        // Android 14+ only lets a PendingIntent start an activity with the sender's privileges when
+        // the sender opts in; the test runner may start activities from the background.
+        val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                .toBundle()
+        } else {
+            null
+        }
+        posted.notification.contentIntent.send(context, 0, null, null, null, null, options)
+        val dialogShown = allowSystemDialogIfShown()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            check(!dialogShown) { "The system asked for confirmation although Media management is allowed" }
+        }
+    }
+
+    /** Runs [change] and waits until the automatic mode watcher has finished looking at it. */
+    fun awaitWatcherRun(context: Context, change: () -> Unit) {
+        val workManager = WorkManager.getInstance(context)
+        val armed = waitFor("the watcher to be armed", 30_000) {
+            workManager.getWorkInfosForUniqueWork(CleanupScheduler.WATCH).get()
+                .firstOrNull { it.state == WorkInfo.State.ENQUEUED }?.id
+        }
+        change()
+        waitFor("the watcher to look at the change", 60_000) {
+            true.takeIf { workManager.getWorkInfoById(armed).get()?.state?.isFinished == true }
+        }
+    }
+
     fun cancelNotifications(context: Context) =
         context.getSystemService(NotificationManager::class.java).cancelAll()
 
@@ -219,6 +290,19 @@ object Device {
         allow.click()
         return true
     }
+}
+
+/**
+ * Runs the daily auto-delete job now, with a cutoff that makes everything saved up to a minute from
+ * now count as expired. [days] is what the setting says (shown in the notification).
+ */
+fun runExpiryWorker(context: Context, days: Int = 1) {
+    CleanupSettings(context).deleteAfterDays = days
+    val worker = TestListenableWorkerBuilder<ExpiryWorker>(context)
+        .setInputData(workDataOf(ExpiryWorker.KEY_CUTOFF_SEC to System.currentTimeMillis() / 1000 + 60))
+        .build()
+    val result = runBlocking { worker.doWork() }
+    assertEquals(ListenableWorker.Result.success(), result)
 }
 
 /** Turns automatic mode on or off the way the switch on the home screen does. */

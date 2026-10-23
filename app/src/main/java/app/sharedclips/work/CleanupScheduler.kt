@@ -14,7 +14,7 @@ import java.time.Duration
 import java.util.concurrent.TimeUnit
 
 object CleanupScheduler {
-    private const val WATCH = "watch-new-videos"
+    internal const val WATCH = "watch-new-videos"
     private const val EXPIRY = "expire-old-videos"
     private const val RECHECK = "recheck-new-videos"
 
@@ -27,6 +27,7 @@ object CleanupScheduler {
         } else {
             wm.cancelUniqueWork(WATCH)
             wm.cancelUniqueWork(RECHECK)
+            Notifications.cancelMovePrompt(context)
         }
         if (settings.deleteAfterDays > 0) {
             wm.enqueueUniquePeriodicWork(
@@ -36,6 +37,7 @@ object CleanupScheduler {
             )
         } else {
             wm.cancelUniqueWork(EXPIRY)
+            Notifications.cancelDeletePrompt(context)
         }
     }
 
@@ -62,11 +64,24 @@ object CleanupScheduler {
      * without cancelling the current run.
      */
     fun recheckLater(context: Context, delayMs: Long, fromRecheck: Boolean) {
+        val policy = if (fromRecheck) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE
+        enqueueRecheck(context, delayMs, policy)
+    }
+
+    /**
+     * A short follow-up look after a watcher run that scheduled nothing else. The re-armed watcher
+     * only starts observing once that run has ended, so a video saved during the run would otherwise
+     * wait for the next change. KEEP leaves an already pending re-check alone; it looks anyway.
+     */
+    fun catchUpSoon(context: Context) = enqueueRecheck(context, CATCH_UP_DELAY_MS, ExistingWorkPolicy.KEEP)
+
+    private fun enqueueRecheck(context: Context, delayMs: Long, policy: ExistingWorkPolicy) {
         val request = OneTimeWorkRequestBuilder<AutoMoveWorker>()
             .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
             .setInputData(workDataOf(AutoMoveWorker.KEY_RECHECK to true))
             .build()
-        val policy = if (fromRecheck) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE
         WorkManager.getInstance(context).enqueueUniqueWork(RECHECK, policy, request)
     }
+
+    private const val CATCH_UP_DELAY_MS = 5_000L
 }

@@ -37,10 +37,18 @@ data class ScannedVideo(
     fun msUntilSettled(nowMs: Long = System.currentTimeMillis()) =
         SettlePolicy.msUntilSettled(lastModifiedMs, bytes, nowMs)
 
+    /** An entry the saving app never wrote to (a failed save); never moved, and not waited for. */
+    fun isAbandoned(nowMs: Long = System.currentTimeMillis()) =
+        SettlePolicy.isAbandoned(bytes, dateAddedSec * 1000, nowMs)
+
     /** One line for the activity log. */
     fun describe(nowMs: Long = System.currentTimeMillis()): String {
         val ageSec = if (lastModifiedMs > 0) "${(nowMs - lastModifiedMs) / 1000}s ago" else "unknown"
-        val state = if (isSettled(nowMs)) "saved" else "still saving"
+        val state = when {
+            isSettled(nowMs) -> "saved"
+            isAbandoned(nowMs) -> "empty, save failed"
+            else -> "still saving"
+        }
         return "$displayName | owner=${ownerPackage ?: "none"} | ${bytes / 1024} KB | " +
             "last written $ageSec | $state | ${detection.verdict}"
     }
@@ -54,8 +62,8 @@ class MediaStoreScanner(private val context: Context) {
      * Scans videos in the camera folder and returns the ones that look like TikTok saves.
      * [addedAfterSec] limits the scan to recent videos (epoch seconds), which keeps background runs cheap.
      */
-    suspend fun scanCameraFolder(addedAfterSec: Long? = null): List<ScannedVideo> =
-        query(folder = CAMERA_RELATIVE_PATH, addedAfterSec = addedAfterSec)
+    suspend fun scanCameraFolder(addedAfterSec: Long? = null, ids: List<Long>? = null): List<ScannedVideo> =
+        query(folder = CAMERA_RELATIVE_PATH, addedAfterSec = addedAfterSec, ids = ids)
             .filter { it.detection.verdict != Verdict.NOT_TIKTOK }
             .let { videos ->
                 // The later of the live file time and MediaStore's time, to err on "still saving".
@@ -85,27 +93,41 @@ class MediaStoreScanner(private val context: Context) {
     suspend fun findExpired(cutoffSec: Long): List<ScannedVideo> =
         query(folder = MediaMover.TARGET_RELATIVE_PATH, addedBeforeSec = cutoffSec, detect = false)
 
+    /** How many of [uris] are still in the camera folder (not moved or trashed yet). */
+    suspend fun stillInCamera(uris: List<Uri>): Int = leftInCamera(uris).size
+
     /** Of [uris], the ones still in the camera folder (not moved or trashed yet). */
-    suspend fun stillInCamera(uris: List<Uri>): Int = withContext(Dispatchers.IO) {
-        uris.count { uri ->
+    suspend fun leftInCamera(uris: List<Uri>): List<Uri> = withContext(Dispatchers.IO) {
+        uris.filter { uri ->
             context.contentResolver.query(
                 uri, arrayOf(MediaStore.Video.Media.RELATIVE_PATH), null, null, null
             )?.use { c -> c.moveToFirst() && c.getString(0)?.startsWith(CAMERA_RELATIVE_PATH) == true } ?: false
         }
     }
 
-    /** Of [uris], the ones that still exist outside the trash. */
-    suspend fun countExisting(uris: List<Uri>): Int = withContext(Dispatchers.IO) {
-        uris.count { uri ->
-            context.contentResolver.query(uri, arrayOf(MediaStore.Video.Media._ID), null, null, null)
-                ?.use { it.moveToFirst() } ?: false
-        }
+    /**
+     * Of [ids], the videos still in TikTok Downloads and not in the trash. Queries the collection:
+     * a query on a single item's URI also returns it while it is in the trash.
+     */
+    suspend fun inTikTokDownloads(ids: List<Long>): List<Uri> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyList()
+        val found = mutableListOf<Uri>()
+        context.contentResolver.query(
+            collection,
+            arrayOf(MediaStore.Video.Media._ID),
+            "${MediaStore.Video.Media._ID} IN (${ids.joinToString(",")}) AND " +
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?",
+            arrayOf("${MediaMover.TARGET_RELATIVE_PATH}%"),
+            null,
+        )?.use { c -> while (c.moveToNext()) found += ContentUris.withAppendedId(collection, c.getLong(0)) }
+        found
     }
 
     private suspend fun query(
         folder: String,
         addedBeforeSec: Long? = null,
         addedAfterSec: Long? = null,
+        ids: List<Long>? = null,
         detect: Boolean = true,
     ): List<ScannedVideo> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
@@ -129,6 +151,10 @@ class MediaStoreScanner(private val context: Context) {
         if (addedAfterSec != null) {
             selection += " AND ${MediaStore.Video.Media.DATE_ADDED} >= ?"
             args += addedAfterSec.toString()
+        }
+        if (ids != null) {
+            if (ids.isEmpty()) return@withContext emptyList()
+            selection += " AND ${MediaStore.Video.Media._ID} IN (${ids.joinToString(",")})"
         }
         val sort = "${MediaStore.Video.Media.DATE_ADDED} DESC"
 

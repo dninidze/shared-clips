@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.sharedclips.data.ActivityLog
 import app.sharedclips.data.MediaStoreScanner
 import app.sharedclips.detect.SettlePolicy
+import app.sharedclips.work.Notifications
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertFalse
@@ -30,6 +31,7 @@ class MoveWithoutDuplicatesTest {
         setAutoMove(context, false)
         Device.cancelNotifications(context)
         FakeTikTok.cleanUp()
+        ActivityLog.clear(context)
     }
 
     @After
@@ -122,15 +124,44 @@ class MoveWithoutDuplicatesTest {
         // sharing the video) writes a new file there. That one must leave Camera too.
         FakeTikTok.startSave(video.name, mode = "tiktok_replica")
         val bytes = video.awaitSaved(nth = 2)
-        video.awaitMoved(timeoutMs = 120_000, count = 2) {
-            if (Device.hasOurNotification(context)) Device.openMoveNotification(context)
-        }
+        video.awaitMoved(timeoutMs = 120_000, count = 2, onTick = ::tapIfNotified)
         video.monitor.watch(10_000)
         video.assertBothSavesMoved(bytes)
         assertTrue(
             "The second save was not logged as one:\n${ActivityLog.read(context).joinToString("\n")}",
             ActivityLog.read(context).any { it.contains(video.name) && it.contains("saved again") },
         )
+    }
+
+    @Test
+    fun autoMode_dismissedNotification_isNotPostedAgain() {
+        val video = TestVideo(context, "dismissed")
+        setAutoMove(context, true)
+        FakeTikTok.startSave(video.name, mode = "mediastore")
+        video.awaitSaved()
+        waitFor("the move notification", 90_000) {
+            true.takeIf { Device.hasNotification(context, Notifications.ID_MOVE) }
+        }
+
+        // The user swipes it away and keeps the video in Camera.
+        Device.cancelNotifications(context)
+        video.monitor.watch(10_000)
+
+        // Another app saves a video somewhere else: automatic mode looks again, but must not ring
+        // again for a video the user has already seen.
+        val other = TestVideo(context, "unrelated")
+        Device.awaitWatcherRun(context) {
+            FakeTikTok.startSave(other.name, mode = "mediastore", relativePath = "Movies/Other")
+            other.awaitSaved()
+        }
+        video.monitor.watch(10_000)
+        assertFalse("The dismissed notification was posted again", Device.hasOurNotification(context))
+        assertTrue("The video left Camera without a tap", video.monitor.sample().single().inCamera)
+    }
+
+    /** Taps the move notification as soon as it is shown, the way a user would. */
+    private fun tapIfNotified() {
+        if (Device.hasNotification(context, Notifications.ID_MOVE)) Device.tapNotification(context, Notifications.ID_MOVE)
     }
 
     /**
@@ -140,11 +171,10 @@ class MoveWithoutDuplicatesTest {
     private fun autoMoveScenario(video: TestVideo, mode: String, startDelayMs: Long = 0) {
         setAutoMove(context, true)
         FakeTikTok.startSave(video.name, mode = mode, chunks = 8, gapMs = 3_000, startDelayMs = startDelayMs)
-        val tapIfNotified = { if (Device.hasOurNotification(context)) Device.openMoveNotification(context) }
-        val bytes = video.awaitSaved(onTick = tapIfNotified)
+        val bytes = video.awaitSaved(onTick = ::tapIfNotified)
         video.assertSavedByTikTok()
 
-        video.awaitMoved(timeoutMs = 120_000, onTick = tapIfNotified)
+        video.awaitMoved(timeoutMs = 120_000, onTick = ::tapIfNotified)
         // Keep watching: a copy left behind or recreated in Camera would show up here.
         video.monitor.watch(10_000)
         video.assertMovedOnce(bytes)

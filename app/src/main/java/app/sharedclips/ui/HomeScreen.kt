@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -63,6 +64,10 @@ fun HomeScreen(
     onDeleteAfterChange: (Int) -> Unit,
     onRequestManageMedia: () -> Unit,
     onRequestAllFilesAccess: () -> Unit,
+    onRequestUnrestricted: () -> Unit,
+    onRequestKeepWhenUnused: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenAppInfo: () -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
 ) {
@@ -89,14 +94,15 @@ fun HomeScreen(
 
             item {
                 AutomationSection(
-                    autoMove = state.autoMove,
-                    deleteAfterDays = state.deleteAfterDays,
-                    canManageMedia = state.canManageMedia,
-                    hasAllFilesAccess = state.hasAllFilesAccess,
+                    state = state,
                     onAutoMoveChange = onAutoMoveChange,
                     onDeleteAfterChange = onDeleteAfterChange,
                     onRequestManageMedia = onRequestManageMedia,
                     onRequestAllFilesAccess = onRequestAllFilesAccess,
+                    onRequestUnrestricted = onRequestUnrestricted,
+                    onRequestKeepWhenUnused = onRequestKeepWhenUnused,
+                    onRequestNotifications = onRequestNotifications,
+                    onOpenAppInfo = onOpenAppInfo,
                 )
             }
 
@@ -141,64 +147,134 @@ fun HomeScreen(
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun AutomationSection(
-    autoMove: Boolean,
-    deleteAfterDays: Int,
-    canManageMedia: Boolean,
-    hasAllFilesAccess: Boolean,
+    state: HomeState,
     onAutoMoveChange: (Boolean) -> Unit,
     onDeleteAfterChange: (Int) -> Unit,
     onRequestManageMedia: () -> Unit,
     onRequestAllFilesAccess: () -> Unit,
+    onRequestUnrestricted: () -> Unit,
+    onRequestKeepWhenUnused: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenAppInfo: () -> Unit,
 ) {
+    val autoDelete = state.deleteAfterDays > 0
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Automatic mode", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Moves new TikTok downloads to TikTok Downloads within seconds",
+                    if (state.hasAllFilesAccess) {
+                        "Moves new TikTok downloads to TikTok Downloads within seconds"
+                    } else {
+                        "Notifies you about new TikTok downloads; one tap moves them to TikTok Downloads"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Switch(checked = autoMove, onCheckedChange = onAutoMoveChange)
+            Switch(checked = state.autoMove, onCheckedChange = onAutoMoveChange)
         }
 
         Text("Delete from TikTok Downloads after", style = MaterialTheme.typography.titleMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CleanupSettings.DELETE_AFTER_OPTIONS.forEach { days ->
                 FilterChip(
-                    selected = days == deleteAfterDays,
+                    selected = days == state.deleteAfterDays,
                     onClick = { onDeleteAfterChange(days) },
                     label = { Text(if (days == 0) "Never" else if (days == 1) "1 day" else "$days days") },
                 )
             }
         }
 
-        if (autoMove || deleteAfterDays > 0) {
-            when {
-                hasAllFilesAccess -> Text(
-                    "Fully automatic: \"All files access\" is on, so videos move and expire without a tap.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
+        if (state.autoMove || autoDelete) {
+            AccessHints(
+                state, onRequestManageMedia, onRequestAllFilesAccess, onRequestUnrestricted,
+                onRequestKeepWhenUnused, onRequestNotifications, onOpenAppInfo,
+            )
+        }
+    }
+}
+
+/** What the user still has to allow for automatic mode and auto-delete to work, and why. */
+@Composable
+private fun AccessHints(
+    state: HomeState,
+    onRequestManageMedia: () -> Unit,
+    onRequestAllFilesAccess: () -> Unit,
+    onRequestUnrestricted: () -> Unit,
+    onRequestKeepWhenUnused: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenAppInfo: () -> Unit,
+) {
+    val autoDelete = state.deleteAfterDays > 0
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val what = when {
+            state.autoMove && autoDelete -> "new videos are moved and old ones deleted"
+            state.autoMove -> "new videos are moved"
+            else -> "old videos are deleted"
+        }
+        if (state.hasAllFilesAccess && state.runsUnrestricted) {
+            Hint("Fully automatic: $what without a tap.", highlight = true)
+        } else if (state.hasAllFilesAccess) {
+            Hint("No tap needed: $what by themselves.", highlight = true)
+        } else {
+            Hint(
+                "Android only lets an app move or delete another app's videos in the background with " +
+                    "\"All files access\". Without it, you get a notification and one tap does it."
+            )
+            OutlinedButton(onClick = onRequestAllFilesAccess) { Text("Allow all files access") }
+            if (!state.notificationsOn) {
+                Hint(
+                    "Notifications are off for this app, so those taps never reach you and videos stay " +
+                        "in Camera until you open the app.",
+                    warning = true,
                 )
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                    Text(
-                        "Android only lets an app move another app's videos in the background with " +
-                            "\"All files access\". Without it, you get a notification and one tap does it.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedButton(onClick = onRequestAllFilesAccess) { Text("Allow all files access") }
-                }
+                OutlinedButton(onClick = onRequestNotifications) { Text("Turn on notifications") }
             }
-            if (!hasAllFilesAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canManageMedia) {
-                Text(
-                    "Allow \"Media management\" so that tap goes through without a confirmation popup.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !state.canManageMedia) {
+                Hint("Allow \"Media management\" so that tap goes through without a confirmation popup.")
                 OutlinedButton(onClick = onRequestManageMedia) { Text("Allow media management") }
             }
         }
+        if (!state.runsUnrestricted) {
+            Hint(
+                "Android holds back background work for apps you rarely open, so this can be late by " +
+                    "hours. Allow unrestricted battery use to have it happen right away."
+            )
+            OutlinedButton(onClick = onRequestUnrestricted) { Text("Allow background use") }
+        }
+        if (!state.keptWhenUnused) {
+            Hint(
+                "Android pauses apps you haven't opened for a few months and takes back their " +
+                    "permissions. Turn off \"Pause app activity if unused\" to keep this running."
+            )
+            OutlinedButton(onClick = onRequestKeepWhenUnused) { Text("Keep running when unused") }
+        }
+        if (Build.MANUFACTURER.lowercase() in AUTO_LAUNCH_VENDORS) {
+            Hint(
+                "On ${Build.MANUFACTURER} phones, also turn on auto launch and background activity for " +
+                    "Shared Clips (App info > Battery usage). Otherwise this pauses after a restart until " +
+                    "you open the app."
+            )
+            OutlinedButton(onClick = onOpenAppInfo) { Text("Open app info") }
+        }
     }
+}
+
+/** Phones whose own background killer also stops apps from starting after a reboot. */
+private val AUTO_LAUNCH_VENDORS = setOf("oneplus", "oppo", "realme", "xiaomi", "redmi", "poco", "vivo", "huawei", "honor")
+
+@Composable
+private fun Hint(text: String, highlight: Boolean = false, warning: Boolean = false) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = when {
+            warning -> MaterialTheme.colorScheme.error
+            highlight -> MaterialTheme.colorScheme.primary
+            else -> Color.Unspecified
+        },
+    )
 }
 
 @Composable
@@ -265,7 +341,11 @@ private fun VideoRow(video: ScannedVideo) {
             Text(
                 Formatter.formatShortFileSize(context, video.sizeBytes) +
                     (if (video.detection.verdict == Verdict.UNSURE) " · not sure" else "") +
-                    (if (!video.isSettled()) " · still saving" else ""),
+                    when {
+                        video.isSettled() -> ""
+                        video.isAbandoned() -> " · empty, save failed"
+                        else -> " · still saving"
+                    },
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
@@ -294,7 +374,7 @@ private fun ActivityLogSection(log: List<String>, onShare: () -> Unit, onClear: 
             Text("Nothing yet.", style = MaterialTheme.typography.bodySmall)
         } else {
             Text(
-                log.takeLast(LOG_LINES_SHOWN).reversed().joinToString("\n"),
+                newestFirst(log.takeLast(LOG_LINES_SHOWN)).joinToString("\n"),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
             )
@@ -302,4 +382,20 @@ private fun ActivityLogSection(log: List<String>, onShare: () -> Unit, onClear: 
     }
 }
 
+/**
+ * Reverses the order of log entries but not the lines within one: an entry's detail lines are
+ * indented after the timestamp and stay under their first line.
+ */
+private fun newestFirst(lines: List<String>): List<String> {
+    val entries = mutableListOf<MutableList<String>>()
+    for (line in lines) {
+        val isDetail = line.length > STAMP_LENGTH && line[STAMP_LENGTH] == ' '
+        if (isDetail && entries.isNotEmpty()) entries.last().add(line) else entries.add(mutableListOf(line))
+    }
+    return entries.reversed().flatten()
+}
+
 private const val LOG_LINES_SHOWN = 40
+
+/** "MM-dd HH:mm:ss " in front of every activity log line. */
+private const val STAMP_LENGTH = 15

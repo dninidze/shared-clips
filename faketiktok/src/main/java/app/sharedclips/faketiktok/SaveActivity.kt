@@ -18,10 +18,11 @@ import kotlin.concurrent.thread
  * Saves a sample video the way the test asks, then logs "DONE <name> bytes=<n>" so the test knows the
  * save has finished. Started from the test with:
  *   am start -W -n com.zhiliaoapp.musically/app.sharedclips.faketiktok.SaveActivity \
- *       --es name <file.mp4> --es mode <mode> --ei chunks <n> --el gapMs <ms>
+ *       --es name <file.mp4> --es mode <mode> --ei chunks <n> --el gapMs <ms> [--es relativePath <dir>]
  *
  * Modes:
- * - mediastore: MediaStore insert, one write, close (a fast, well-behaved save)
+ * - mediastore: MediaStore insert, one write, close (a fast, well-behaved save); --es relativePath
+ *   saves somewhere other than DCIM/Camera
  * - mediastore_slow: MediaStore insert, one output stream written in chunks with pauses
  * - mediastore_pending: like mediastore_slow, but hidden with IS_PENDING until finished
  * - file_chunked: raw file path, reopened in append mode for every chunk (a multi-session save)
@@ -45,11 +46,12 @@ class SaveActivity : Activity() {
         val chunks = intent.getIntExtra("chunks", 1).coerceAtLeast(1)
         val gapMs = intent.getLongExtra("gapMs", 0L)
         val startDelayMs = intent.getLongExtra("startDelayMs", 0L)
+        val relativePath = intent.getStringExtra("relativePath") ?: "DCIM/Camera"
 
         thread(name = "fake-tiktok-save") {
             val bytes = try {
                 when (mode) {
-                    "mediastore" -> saveViaMediaStore(name, chunks = 1, gapMs = 0, pending = false)
+                    "mediastore" -> saveViaMediaStore(name, chunks = 1, gapMs = 0, pending = false, relativePath)
                     "mediastore_slow" -> saveViaMediaStore(name, chunks, gapMs, pending = false)
                     "mediastore_pending" -> saveViaMediaStore(name, chunks, gapMs, pending = true)
                     "file_chunked" -> saveViaFilePath(name, chunks, gapMs, visibleEarly = false)
@@ -77,12 +79,18 @@ class SaveActivity : Activity() {
         }
     }
 
-    private fun saveViaMediaStore(name: String, chunks: Int, gapMs: Long, pending: Boolean): Long {
+    private fun saveViaMediaStore(
+        name: String,
+        chunks: Int,
+        gapMs: Long,
+        pending: Boolean,
+        relativePath: String = "DCIM/Camera",
+    ): Long {
         val data = sample()
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera")
+            put(MediaStore.Video.Media.RELATIVE_PATH, relativePath)
             if (pending) put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val uri = contentResolver.insert(collection(), values) ?: error("insert failed")

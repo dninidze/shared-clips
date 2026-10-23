@@ -10,12 +10,23 @@ android {
 
     defaultConfig {
         applicationId = "app.sharedclips"
-        minSdk = 29
+        minSdk = 30
         targetSdk = 35
-        versionCode = 3
+        versionCode = 4
         versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        // A fixed debug key, so each CI build installs over the previous one instead of failing
+        // with "package conflicts with an existing package". Debug builds only.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -54,4 +65,5 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestImplementation(libs.androidx.work.testing)
 }

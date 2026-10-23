@@ -10,6 +10,9 @@ package app.sharedclips.detect
 object SettlePolicy {
     const val QUIET_PERIOD_MS = 15_000L
 
+    /** An entry still empty this long after it was added is a save that failed, not one in progress. */
+    const val ABANDONED_AFTER_MS = 10 * 60_000L
+
     /** A modification time this far in the future cannot come from a write in progress. */
     private const val FUTURE_TOLERANCE_MS = 60_000L
 
@@ -18,6 +21,10 @@ object SettlePolicy {
         val age = nowMs - lastModifiedMs
         return age >= QUIET_PERIOD_MS || age < -FUTURE_TOLERANCE_MS
     }
+
+    /** True for an entry that never got any bytes: there is nothing to wait for or to move. */
+    fun isAbandoned(sizeBytes: Long, addedMs: Long, nowMs: Long): Boolean =
+        sizeBytes <= 0 && addedMs > 0 && nowMs - addedMs >= ABANDONED_AFTER_MS
 
     /** How long until the video may count as saved; 0 if it already does. An empty file waits one period. */
     fun msUntilSettled(lastModifiedMs: Long, sizeBytes: Long, nowMs: Long): Long {
