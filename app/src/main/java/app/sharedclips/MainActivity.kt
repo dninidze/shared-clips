@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun shareLog() {
-        val header = "Shared Clips ${viewModel.state.value.versionName} on ${Build.MANUFACTURER} ${Build.MODEL}, " +
+        val header = "ClipSweep ${viewModel.state.value.versionName} (${BuildConfig.FLAVOR}) on ${Build.MANUFACTURER} ${Build.MODEL}, " +
             "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n" + AppAccess.summary(this)
         val text = (listOf(header) + ActivityLog.read(this)).joinToString("\n")
         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
@@ -101,12 +101,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Asks for "Unrestricted" battery use, so Android runs the watcher without delays. */
-    private fun openBatterySettings() = openFirst(
-        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, appUri()),
-        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-        appDetails(),
-    )
+    /**
+     * Asks for "Unrestricted" battery use, so Android runs the watcher without delays. The direct
+     * request needs a permission only the full build has; the Play build opens App info, where
+     * Battery usage > Unrestricted is one tap away.
+     */
+    private fun openBatterySettings() = if (BuildConfig.ALL_FILES_ACCESS) {
+        openFirst(
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, appUri()),
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+            appDetails(),
+        )
+    } else {
+        openFirst(appDetails(), Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    }
 
     /** The app's "Pause app activity if unused" switch. */
     private fun openUnusedAppSettings() = openFirst(Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS, appUri()), appDetails())

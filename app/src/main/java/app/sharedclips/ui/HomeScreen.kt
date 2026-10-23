@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import app.sharedclips.BuildConfig
 import app.sharedclips.HomeState
 import app.sharedclips.data.CleanupMode
 import app.sharedclips.data.CleanupSettings
@@ -82,7 +83,7 @@ fun HomeScreen(
         ) {
             item {
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text("Shared Clips", style = MaterialTheme.typography.headlineMedium)
+                    Text("ClipSweep", style = MaterialTheme.typography.headlineMedium)
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "v${state.versionName}",
@@ -218,11 +219,15 @@ private fun AccessHints(
         } else if (state.hasAllFilesAccess) {
             Hint("No tap needed: $what by themselves.", highlight = true)
         } else {
-            Hint(
-                "Android only lets an app move or delete another app's videos in the background with " +
-                    "\"All files access\". Without it, you get a notification and one tap does it."
-            )
-            OutlinedButton(onClick = onRequestAllFilesAccess) { Text("Allow all files access") }
+            if (BuildConfig.ALL_FILES_ACCESS) {
+                Hint(
+                    "Android only lets an app move or delete another app's videos in the background with " +
+                        "\"All files access\". Without it, you get a notification and one tap does it."
+                )
+                OutlinedButton(onClick = onRequestAllFilesAccess) { Text("Allow all files access") }
+            } else {
+                Hint("When there is something to do, you get a notification and one tap does it.")
+            }
             if (!state.notificationsOn) {
                 val missed = when {
                     state.autoMove && autoDelete ->
@@ -241,7 +246,8 @@ private fun AccessHints(
         if (!state.runsUnrestricted) {
             Hint(
                 "Android holds back background work for apps you rarely open, so this can be late by " +
-                    "hours. Allow unrestricted battery use to have it happen right away."
+                    "hours. Allow unrestricted battery use to have it happen right away." +
+                    if (BuildConfig.ALL_FILES_ACCESS) "" else " In App info, open Battery usage and pick Unrestricted."
             )
             OutlinedButton(onClick = onRequestUnrestricted) { Text("Allow background use") }
         }
@@ -255,7 +261,7 @@ private fun AccessHints(
         if (Build.MANUFACTURER.lowercase() in AUTO_LAUNCH_VENDORS) {
             Hint(
                 "On ${Build.MANUFACTURER} phones, also turn on auto launch and background activity for " +
-                    "Shared Clips (App info > Battery usage). Otherwise this pauses after a restart until " +
+                    "ClipSweep (App info > Battery usage). Otherwise this pauses after a restart until " +
                     "you open the app."
             )
             OutlinedButton(onClick = onOpenAppInfo) { Text("Open app info") }
