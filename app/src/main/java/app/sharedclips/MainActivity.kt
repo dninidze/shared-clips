@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.sharedclips.data.CleanupMode
 import app.sharedclips.ui.HomeScreen
 import app.sharedclips.ui.theme.SharedClipsTheme
 
@@ -47,14 +48,15 @@ class MainActivity : ComponentActivity() {
                 HomeScreen(
                     state = state,
                     onScan = { permissionLauncher.launch(readPermission) },
-                    onMove = {
-                        viewModel.moveRequest()?.let {
-                            moveLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
-                        }
-                    },
-                    onTrash = {
-                        viewModel.trashRequest()?.let {
-                            trashLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
+                    onModeChange = viewModel::setMode,
+                    onCleanUp = {
+                        when (state.mode) {
+                            CleanupMode.MOVE_TO_FOLDER -> viewModel.moveRequest()?.let {
+                                moveLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
+                            }
+                            CleanupMode.DELETE -> viewModel.trashRequest()?.let {
+                                trashLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
+                            }
                         }
                     },
                 )

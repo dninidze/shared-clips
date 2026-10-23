@@ -43,6 +43,7 @@ class MediaMover(private val context: Context) {
         }
 
     companion object {
-        const val TARGET_RELATIVE_PATH = "Movies/Shared Clips/"
+        /** Outside DCIM/Camera, so Google Photos does not back it up unless the user turns this folder on. */
+        const val TARGET_RELATIVE_PATH = "Movies/TikTok Downloads/"
     }
 }

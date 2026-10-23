@@ -5,6 +5,8 @@ import android.app.PendingIntent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.sharedclips.action.MediaMover
+import app.sharedclips.data.CleanupMode
+import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
 import app.sharedclips.data.ScannedVideo
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +18,7 @@ data class HomeState(
     val scanning: Boolean = false,
     val videos: List<ScannedVideo> = emptyList(),
     val message: String? = null,
+    val mode: CleanupMode = CleanupMode.MOVE_TO_FOLDER,
 ) {
     val totalBytes: Long get() = videos.sumOf { it.sizeBytes }
 }
@@ -23,9 +26,15 @@ data class HomeState(
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val scanner = MediaStoreScanner(app)
     private val mover = MediaMover(app)
+    private val settings = CleanupSettings(app)
 
-    private val _state = MutableStateFlow(HomeState())
+    private val _state = MutableStateFlow(HomeState(mode = settings.mode))
     val state: StateFlow<HomeState> = _state
+
+    fun setMode(mode: CleanupMode) {
+        settings.mode = mode
+        _state.update { it.copy(mode = mode) }
+    }
 
     fun scan() {
         _state.update { it.copy(scanning = true, message = null) }
@@ -43,7 +52,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun onMoveApproved() {
         viewModelScope.launch {
             val moved = mover.moveOutOfCamera(_state.value.videos.map { it.uri })
-            _state.update { it.copy(message = "Moved $moved videos out of Camera") }
+            _state.update { it.copy(message = "Moved $moved videos to TikTok Downloads") }
             scan()
         }
     }

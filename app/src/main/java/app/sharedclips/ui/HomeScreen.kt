@@ -17,10 +17,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,8 +34,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.sharedclips.HomeState
+import app.sharedclips.data.CleanupMode
 import app.sharedclips.data.ScannedVideo
 import app.sharedclips.detect.Verdict
 import kotlinx.coroutines.Dispatchers
@@ -42,8 +47,8 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     state: HomeState,
     onScan: () -> Unit,
-    onMove: () -> Unit,
-    onTrash: () -> Unit,
+    onModeChange: (CleanupMode) -> Unit,
+    onCleanUp: () -> Unit,
 ) {
     val context = LocalContext.current
     Scaffold { padding ->
@@ -70,15 +75,58 @@ fun HomeScreen(
             }
             state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
+            ModePicker(state.mode, onModeChange)
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onMove, enabled = state.videos.isNotEmpty()) { Text("Move out of Camera") }
-                OutlinedButton(onClick = onTrash, enabled = state.videos.isNotEmpty()) { Text("Delete") }
+                Button(onClick = onCleanUp, enabled = state.videos.isNotEmpty()) {
+                    Text(if (state.mode == CleanupMode.DELETE) "Delete all" else "Move all")
+                }
+                OutlinedButton(onClick = onScan) { Text("Scan again") }
             }
-            OutlinedButton(onClick = onScan) { Text("Scan again") }
 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.videos, key = { it.id }) { VideoRow(it) }
             }
+        }
+    }
+}
+
+@Composable
+private fun ModePicker(mode: CleanupMode, onModeChange: (CleanupMode) -> Unit) {
+    Column(Modifier.selectableGroup()) {
+        ModeOption(
+            selected = mode == CleanupMode.MOVE_TO_FOLDER,
+            title = "Move to \"TikTok Downloads\" folder",
+            subtitle = "Keeps the videos, out of Camera and out of Google Photos backup",
+            onClick = { onModeChange(CleanupMode.MOVE_TO_FOLDER) },
+        )
+        ModeOption(
+            selected = mode == CleanupMode.DELETE,
+            title = "Delete",
+            subtitle = "Moves the videos to the trash, recoverable for 30 days",
+            onClick = { onModeChange(CleanupMode.DELETE) },
+        )
+    }
+}
+
+@Composable
+private fun ModeOption(selected: Boolean, title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
