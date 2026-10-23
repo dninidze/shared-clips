@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
@@ -103,7 +104,9 @@ class CopyMonitor(private val prefix: String) {
         val copies = Copies.onDisk(prefix)
         val summary = copies.joinToString { "${it.folder.substringAfter("/sdcard/")}/${it.name} (${it.bytes} B)" }
         if (timeline.lastOrNull()?.substringAfter(": ") != summary) {
-            timeline += "+${(SystemClock.uptimeMillis() - start) / 1000}s: $summary"
+            val entry = "+${(SystemClock.uptimeMillis() - start) / 1000}s: $summary"
+            timeline += entry
+            Log.i(TEST_TAG, "$prefix $entry")
         }
         maxCopies = maxOf(maxCopies, copies.size)
         return copies
@@ -137,11 +140,18 @@ object Device {
     fun cancelNotifications(context: Context) =
         context.getSystemService(NotificationManager::class.java).cancelAll()
 
-    /** Same as tapping the "move to TikTok Downloads" notification. */
+    /**
+     * Same as tapping the "move to TikTok Downloads" notification. Does not wait for the activity's
+     * lifecycle: it can finish itself or be covered by the system consent screen at any moment, so
+     * callers wait for the effect on disk instead.
+     */
     fun openMoveNotification(context: Context) {
+        Log.i(TEST_TAG, "Opening CleanupActivity (simulated notification tap)")
         cancelNotifications(context)
-        val intent = Intent(context, CleanupActivity::class.java).setAction(CleanupActivity.ACTION_MOVE_NEW)
-        instrumentation.startActivitySync(intent)
+        val intent = Intent(context, CleanupActivity::class.java)
+            .setAction(CleanupActivity.ACTION_MOVE_NEW)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
         allowSystemDialogIfShown()
     }
 
@@ -151,6 +161,8 @@ object Device {
         device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 3_000)?.click()
     }
 }
+
+const val TEST_TAG = "SharedClipsTest"
 
 fun <T : Any> waitFor(what: String, timeoutMs: Long, onTick: () -> Unit = {}, block: () -> T?): T {
     val deadline = SystemClock.uptimeMillis() + timeoutMs
