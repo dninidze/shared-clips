@@ -77,7 +77,8 @@ class AllFilesAccessTest {
         assertEquals("Not in the trash:\n$log", 1, Copies.inTrash(context, video.prefix))
         assertTrue("Still on disk: ${video.monitor.report()}", video.monitor.sample().isEmpty())
         assertTrue("Still in the gallery", Copies.inMediaStore(context, video.prefix).isEmpty())
-        assertTrue("Not logged:\n$log", log.contains("Auto-delete: 1 older than 1 day, 1 trashed"))
+        // Nothing left over, so no notification either (", 1 left -> notification" would follow).
+        assertTrue("Not logged as fully trashed:\n$log", log.lines().any { it.endsWith("Auto-delete: 1 older than 1 day, 1 trashed") })
     }
 
     /** Saves like TikTok in automatic mode and waits for the move, failing if it needed a tap. */

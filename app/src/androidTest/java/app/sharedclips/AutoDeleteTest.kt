@@ -6,7 +6,6 @@ import app.sharedclips.data.ActivityLog
 import app.sharedclips.detect.SettlePolicy
 import app.sharedclips.work.Notifications
 import org.junit.After
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -48,7 +47,8 @@ class AutoDeleteTest {
 
         runExpiryWorker(context)
 
-        assertTrue("No delete notification", Device.hasNotification(context, Notifications.ID_DELETE))
+        // Android posts and removes notifications asynchronously, so their state is waited for.
+        awaitDeletePrompt(shown = true)
         assertTrue("Trashed without a tap", video.monitor.sample().single().inTikTokDownloads)
 
         Device.tapNotification(context, Notifications.ID_DELETE)
@@ -72,11 +72,17 @@ class AutoDeleteTest {
         Device.openMoveNotification(context)
         video.awaitMoved()
         runExpiryWorker(context)
-        assertTrue(Device.hasNotification(context, Notifications.ID_DELETE))
+        awaitDeletePrompt(shown = true)
 
         // The user deletes the video another way; the next run withdraws the stale prompt.
         FakeTikTok.cleanUp()
         runExpiryWorker(context)
-        assertFalse("Stale delete notification left", Device.hasNotification(context, Notifications.ID_DELETE))
+        awaitDeletePrompt(shown = false)
+    }
+
+    private fun awaitDeletePrompt(shown: Boolean) {
+        waitFor(if (shown) "the delete notification" else "the stale delete notification to go", 10_000) {
+            true.takeIf { Device.hasNotification(context, Notifications.ID_DELETE) == shown }
+        }
     }
 }
