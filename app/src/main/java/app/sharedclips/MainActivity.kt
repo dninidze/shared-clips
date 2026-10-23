@@ -2,6 +2,9 @@ package app.sharedclips
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -18,6 +21,11 @@ import app.sharedclips.ui.theme.SharedClipsTheme
 
 class MainActivity : ComponentActivity() {
     private val viewModel: HomeViewModel by viewModels()
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshAccess()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,12 +51,35 @@ class MainActivity : ComponentActivity() {
                     ActivityResultContracts.StartIntentSenderForResult()
                 ) { if (it.resultCode == Activity.RESULT_OK) viewModel.onTrashApproved() }
 
+                val notificationLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission()
+                ) { }
+
                 LaunchedEffect(Unit) { permissionLauncher.launch(readPermission) }
 
                 HomeScreen(
                     state = state,
                     onScan = { permissionLauncher.launch(readPermission) },
                     onModeChange = viewModel::setMode,
+                    onAutoMoveChange = { enabled ->
+                        viewModel.setAutoMove(enabled)
+                        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                    onDeleteAfterChange = { days ->
+                        viewModel.setDeleteAfterDays(days)
+                        if (days > 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                    onRequestManageMedia = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            startActivity(
+                                Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:$packageName"))
+                            )
+                        }
+                    },
                     onCleanUp = {
                         when (state.mode) {
                             CleanupMode.MOVE_TO_FOLDER -> viewModel.moveRequest()?.let {

@@ -1,6 +1,7 @@
 package app.sharedclips.ui
 
 import android.graphics.Bitmap
+import android.os.Build
 import android.text.format.Formatter
 import android.util.Size
 import androidx.compose.foundation.Image
@@ -8,6 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,10 +25,14 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,6 +46,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.sharedclips.HomeState
 import app.sharedclips.data.CleanupMode
+import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.ScannedVideo
 import app.sharedclips.detect.Verdict
 import kotlinx.coroutines.Dispatchers
@@ -49,44 +58,108 @@ fun HomeScreen(
     onScan: () -> Unit,
     onModeChange: (CleanupMode) -> Unit,
     onCleanUp: () -> Unit,
+    onAutoMoveChange: (Boolean) -> Unit,
+    onDeleteAfterChange: (Int) -> Unit,
+    onRequestManageMedia: () -> Unit,
 ) {
     val context = LocalContext.current
     Scaffold { padding ->
-        Column(
+        LazyColumn(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Shared Clips", style = MaterialTheme.typography.headlineMedium)
-            when {
-                state.scanning -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text("Scanning your Camera folder")
-                }
-                state.videos.isEmpty() -> Text("No TikTok videos in your Camera folder.")
-                else -> Text(
-                    "${state.videos.size} TikTok videos, " +
-                        Formatter.formatShortFileSize(context, state.totalBytes),
-                    style = MaterialTheme.typography.titleMedium,
+            item { Text("Shared Clips", style = MaterialTheme.typography.headlineMedium) }
+
+            item {
+                AutomationSection(
+                    autoMove = state.autoMove,
+                    deleteAfterDays = state.deleteAfterDays,
+                    canManageMedia = state.canManageMedia,
+                    onAutoMoveChange = onAutoMoveChange,
+                    onDeleteAfterChange = onDeleteAfterChange,
+                    onRequestManageMedia = onRequestManageMedia,
                 )
             }
-            state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
-            ModePicker(state.mode, onModeChange)
+            item { HorizontalDivider() }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onCleanUp, enabled = state.videos.isNotEmpty()) {
-                    Text(if (state.mode == CleanupMode.DELETE) "Delete all" else "Move all")
+            item {
+                when {
+                    state.scanning -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Scanning your Camera folder")
+                    }
+                    state.videos.isEmpty() -> Text("No TikTok videos in your Camera folder.")
+                    else -> Text(
+                        "${state.videos.size} TikTok videos in Camera, " +
+                            Formatter.formatShortFileSize(context, state.totalBytes),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
                 }
-                OutlinedButton(onClick = onScan) { Text("Scan again") }
+            }
+            state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
+
+            item { ModePicker(state.mode, onModeChange) }
+
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onCleanUp, enabled = state.videos.isNotEmpty()) {
+                        Text(if (state.mode == CleanupMode.DELETE) "Delete all" else "Move all")
+                    }
+                    OutlinedButton(onClick = onScan) { Text("Scan again") }
+                }
             }
 
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.videos, key = { it.id }) { VideoRow(it) }
+            items(state.videos, key = { it.id }) { VideoRow(it) }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun AutomationSection(
+    autoMove: Boolean,
+    deleteAfterDays: Int,
+    canManageMedia: Boolean,
+    onAutoMoveChange: (Boolean) -> Unit,
+    onDeleteAfterChange: (Int) -> Unit,
+    onRequestManageMedia: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Automatic mode", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Moves new TikTok downloads to TikTok Downloads within seconds",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+            Switch(checked = autoMove, onCheckedChange = onAutoMoveChange)
+        }
+
+        Text("Delete from TikTok Downloads after", style = MaterialTheme.typography.titleMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CleanupSettings.DELETE_AFTER_OPTIONS.forEach { days ->
+                FilterChip(
+                    selected = days == deleteAfterDays,
+                    onClick = { onDeleteAfterChange(days) },
+                    label = { Text(if (days == 0) "Never" else if (days == 1) "1 day" else "$days days") },
+                )
+            }
+        }
+
+        if ((autoMove || deleteAfterDays > 0) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canManageMedia) {
+            Text(
+                "Allow \"Media management\" so this runs without asking each time. " +
+                    "Without it, you get a notification to tap instead.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = onRequestManageMedia) { Text("Allow media management") }
         }
     }
 }

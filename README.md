@@ -4,13 +4,16 @@ Android app that finds saved TikTok videos in `DCIM/Camera`, moves them out of t
 
 Plan: see the "TikTok Video Cleanup: Product & Technical Plan" doc in the project.
 
-## Status (MVP, manual mode)
+## Status
 
 - Scans `DCIM/Camera` videos via MediaStore and scores each one (`detect/TikTokDetector.kt`).
 - The user picks what cleanup does: move matches to `Movies/TikTok Downloads/` (default) or delete them to the system trash (recoverable for 30 days). The choice is remembered.
 - One tap applies it to all matches (one system consent dialog per batch on Android 11+).
 
-Not built yet: background watcher, auto-expiry after N days, "Not sure" review, settings.
+- Automatic mode: a WorkManager job with a MediaStore content-URI trigger moves new confirmed TikTok videos out of Camera within seconds. With "Media management" access (Android 12+) it runs silently; otherwise, or if Android blocks the background request, a notification offers a one-tap move.
+- Auto-delete: a daily job trashes videos in TikTok Downloads saved more than N days ago (Never, 1, 3, 7, 14 or 30 days), with the same silent-or-notification fallback.
+
+Not built yet: "Not sure" review, other source apps.
 
 ## Build
 

@@ -9,6 +9,7 @@ import app.sharedclips.data.CleanupMode
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
 import app.sharedclips.data.ScannedVideo
+import app.sharedclips.work.CleanupScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -19,6 +20,9 @@ data class HomeState(
     val videos: List<ScannedVideo> = emptyList(),
     val message: String? = null,
     val mode: CleanupMode = CleanupMode.MOVE_TO_FOLDER,
+    val autoMove: Boolean = false,
+    val deleteAfterDays: Int = 0,
+    val canManageMedia: Boolean = false,
 ) {
     val totalBytes: Long get() = videos.sumOf { it.sizeBytes }
 }
@@ -28,8 +32,36 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val mover = MediaMover(app)
     private val settings = CleanupSettings(app)
 
-    private val _state = MutableStateFlow(HomeState(mode = settings.mode))
+    private val _state = MutableStateFlow(
+        HomeState(
+            mode = settings.mode,
+            autoMove = settings.autoMove,
+            deleteAfterDays = settings.deleteAfterDays,
+            canManageMedia = mover.canManageMedia(),
+        )
+    )
     val state: StateFlow<HomeState> = _state
+
+    init {
+        CleanupScheduler.apply(app)
+    }
+
+    fun setAutoMove(enabled: Boolean) {
+        settings.autoMove = enabled
+        _state.update { it.copy(autoMove = enabled) }
+        CleanupScheduler.apply(getApplication())
+    }
+
+    fun setDeleteAfterDays(days: Int) {
+        settings.deleteAfterDays = days
+        _state.update { it.copy(deleteAfterDays = days) }
+        CleanupScheduler.apply(getApplication())
+    }
+
+    /** Re-reads "Media management" access, which the user changes in system settings. */
+    fun refreshAccess() {
+        _state.update { it.copy(canManageMedia = mover.canManageMedia()) }
+    }
 
     fun setMode(mode: CleanupMode) {
         settings.mode = mode

@@ -8,6 +8,8 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Android 13+: one-tap prompts when a background move or delete needs the user -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Android 12+: lets the user grant "Media management" so moves and trash run without a dialog -->
     <uses-permission
         android:name="android.permission.MANAGE_MEDIA"
@@ -26,5 +28,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".CleanupActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.SharedClips.Translucent" />
     </application>
 </manifest>
