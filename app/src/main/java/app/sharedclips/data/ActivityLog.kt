@@ -1,6 +1,7 @@
 package app.sharedclips.data
 
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -11,12 +12,14 @@ import java.util.Locale
  * from the user's shared log. Keeps the last [MAX_LINES] lines in app-private storage.
  */
 object ActivityLog {
+    private const val TAG = "SharedClips"
     private const val FILE_NAME = "activity.log"
     private const val MAX_LINES = 300
     private val lock = Any()
     private val timeFormat = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
 
     fun add(context: Context, message: String) = synchronized(lock) {
+        Log.i(TAG, message)
         val file = file(context)
         val stamp = timeFormat.format(Date())
         val lines = readLines(file) + message.lines().map { "$stamp $it" }
