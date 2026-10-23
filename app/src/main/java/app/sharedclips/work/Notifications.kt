@@ -35,16 +35,18 @@ object Notifications {
 
     /**
      * Prompts to move the TikTok videos with [ids] out of Camera, and keeps that prompt up to date.
-     * - Videos the user swiped the prompt away for do not bring it back on their own.
-     * - A prompt Android removed (a restart, an app update) comes back, without sound, while its
+     * - It alerts for videos it has not announced before, and otherwise updates without sound.
+     * - Videos whose prompt the user swiped away or tapped do not bring it back on their own.
+     * - A prompt Android removed (a restart, an app update) comes back without sound while its
      *   videos are still in Camera.
-     * - It alerts only for videos it has not announced before.
+     * - A prompt that is up is never narrowed here (an older run may have seen fewer videos);
+     *   [withdrawMovePromptIfDone] removes it once its videos are gone.
      */
     fun showMovePrompt(context: Context, ids: List<Long>): Result = synchronized(MovePromptState) {
         val state = MovePromptState(context)
         val triggers = ids.filterNot { it in state.dismissed }
         if (triggers.isEmpty()) return@synchronized Result.DISMISSED
-        if (isShowing(context, ID_MOVE) && state.shown.toSet() == ids.toSet()) return@synchronized Result.ALREADY_SHOWN
+        if (isShowing(context, ID_MOVE) && state.shown.containsAll(ids)) return@synchronized Result.ALREADY_SHOWN
         val alert = triggers.any { it !in state.announced }
         val result = show(
             context,
@@ -55,6 +57,8 @@ object Notifications {
             title = if (ids.size == 1) "New TikTok video in Camera" else "${ids.size} new TikTok videos in Camera",
             text = "Tap to move to TikTok Downloads",
             silent = !alert,
+            // An update that adds a new video must alert even though the prompt is already up.
+            onlyAlertOnce = !alert,
             onDismiss = Intent(context, MovePromptDismissed::class.java),
         )
         if (result != Result.POSTED) return@synchronized result
@@ -63,7 +67,18 @@ object Notifications {
         if (alert) Result.POSTED else Result.POSTED_SILENTLY
     }
 
-    /** Lets [ids] alert again next time, e.g. after a tap found them still being saved. */
+    /**
+     * The user tapped the prompt for [ids]: Android removed it without telling us, so it must not
+     * count as removed by Android. Whatever the tap leads to (moved, declined), the prompt does not
+     * come back for these videos on its own.
+     */
+    fun moveTapped(context: Context, ids: List<Long>) = synchronized(MovePromptState) {
+        val state = MovePromptState(context)
+        state.dismissed = state.dismissed + ids
+        if (ids.containsAll(state.shown)) state.shown = emptyList()
+    }
+
+    /** Lets [ids] be announced, with sound, again; e.g. after a tap found them still being saved. */
     fun announceAgain(context: Context, ids: List<Long>) = synchronized(MovePromptState) {
         val state = MovePromptState(context)
         state.announced = state.announced - ids.toSet()
@@ -76,14 +91,10 @@ object Notifications {
      */
     suspend fun withdrawMovePromptIfDone(context: Context) {
         val shown = synchronized(MovePromptState) { MovePromptState(context).shown }
-        if (MediaStoreScanner(context).idsInCamera(shown).isNotEmpty()) return
+        if (shown.isEmpty() || MediaStoreScanner(context).idsInCamera(shown).isNotEmpty()) return
         synchronized(MovePromptState) {
-            val state = MovePromptState(context)
             // Unless a newer prompt was posted meanwhile.
-            if (state.shown == shown) {
-                cancelMovePrompt(context)
-                state.shown = emptyList()
-            }
+            if (MovePromptState(context).shown == shown) cancelMovePrompt(context)
         }
     }
 
@@ -103,7 +114,10 @@ object Notifications {
 
     fun dayCount(days: Int) = if (days == 1) "1 day" else "$days days"
 
-    fun cancelMovePrompt(context: Context) = NotificationManagerCompat.from(context).cancel(ID_MOVE)
+    fun cancelMovePrompt(context: Context) = synchronized(MovePromptState) {
+        NotificationManagerCompat.from(context).cancel(ID_MOVE)
+        MovePromptState(context).shown = emptyList()
+    }
 
     fun cancelDeletePrompt(context: Context) = NotificationManagerCompat.from(context).cancel(ID_DELETE)
 
@@ -120,6 +134,7 @@ object Notifications {
         title: String,
         text: String,
         silent: Boolean = false,
+        onlyAlertOnce: Boolean = true,
         onDismiss: Intent? = null,
     ): Result {
         ensureChannel(context)
@@ -135,7 +150,7 @@ object Notifications {
             .setContentText(text)
             .setContentIntent(PendingIntent.getActivity(context, id, intent, flags))
             .setAutoCancel(true)
-            .setOnlyAlertOnce(true)
+            .setOnlyAlertOnce(onlyAlertOnce)
             .setSilent(silent)
         // Android sends this only when the user swipes the notification away or clears all, not
         // for a tap, a cancel by the app, a restart or an update.
@@ -163,7 +178,9 @@ class MovePromptDismissed : BroadcastReceiver() {
         synchronized(MovePromptState) {
             val state = MovePromptState(context)
             state.dismissed = state.dismissed + ids
-            state.shown = emptyList()
+            // A worker run may have posted again between the swipe and now: a prompt that names only
+            // dismissed videos goes, one that also names a newer video stays.
+            if (state.dismissed.containsAll(state.shown)) Notifications.cancelMovePrompt(context)
         }
     }
 }

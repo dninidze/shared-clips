@@ -17,7 +17,7 @@ Plan: see the "TikTok Video Cleanup: Product & Technical Plan" doc in the projec
 - Auto-delete: a daily job trashes videos in TikTok Downloads saved more than N days ago (Never, 1, 3, 7, 14 or 30 days): directly with All files access, otherwise through a one-tap notification.
 
 - Videos are only moved or deleted once they have finished saving: the live file is non-empty and has not been written for 15 s. This guards against moving a file another app is still writing. An entry still empty after 10 minutes is a failed save: it is never moved, and "Delete all" can remove it.
-- Each notification carries the videos it announced; tapping it acts on exactly those. It alerts once per video. Swiping it away keeps it away for those videos; if Android removes it instead (a restart or an app update), it comes back without sound while they are still in Camera.
+- Each notification carries the videos it announced; tapping it acts on exactly those. It makes a sound once per video, including when a new video joins a notification that is already up. Swiping it away or tapping it keeps it away for those videos; if Android removes it instead (a restart or an app update), it comes back without sound shortly after the app next runs, while they are still in Camera.
 - Background reliability: Android delays jobs of apps that are rarely opened and pauses apps unused for months. The home screen offers "Allow background use" (unrestricted battery) and "Keep running when unused". On OnePlus, OPPO, Realme, Xiaomi and similar phones, also allow auto launch and background activity in the app's battery settings, or automatic mode pauses after a restart until the app is opened.
 - Activity log on the home screen records what the app saw and did, with a Share button for bug reports.
 
@@ -41,7 +41,7 @@ Debug builds are signed with the checked-in `app/debug.keystore`, so every CI AP
   check each save ends up as complete files in TikTok Downloads only, with matching gallery entries, that two
   copies never exist at once, and that tapping the posted notification needs no confirmation popup. They also
   check that a dismissed notification is not posted again after an unrelated video change while one Android
-  removed comes back, and that the
+  removed comes back without sound (and alerts again when a new video joins it), and that the
   auto-delete job's notification moves expired videos to the trash (`AutoDeleteTest`).
   `AllFilesAccessTest` runs in a second pass with "All files access" granted and checks nothing needs a tap,
   including auto-delete.

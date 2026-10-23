@@ -160,19 +160,20 @@ class MoveWithoutDuplicatesTest {
     }
 
     @Test
-    fun autoMode_notificationRemovedByAndroid_comesBack() {
-        val video = TestVideo(context, "removed")
+    fun autoMode_notificationRemovedByAndroid_comesBackQuietly_andAlertsForANewVideo() {
+        val first = TestVideo(context, "removed")
         setAutoMove(context, true)
-        FakeTikTok.startSave(video.name, mode = "mediastore")
-        video.awaitSaved()
+        FakeTikTok.startSave(first.name, mode = "mediastore")
+        first.awaitSaved()
         waitFor("the move notification", 90_000) {
             true.takeIf { Device.hasNotification(context, Notifications.ID_MOVE) }
         }
+        assertTrue("The first notification made no sound", Device.notificationAlerts(context, Notifications.ID_MOVE))
 
         // Android removes it, as on a restart or an app update; the user never saw it go.
         Device.cancelNotifications(context)
 
-        // The next look (at the latest, after the next video change) shows it again.
+        // The next look (at the latest, after the next video change) shows it again, without sound.
         val other = TestVideo(context, "unrelated")
         Device.awaitWatcherRun(context) {
             FakeTikTok.startSave(other.name, mode = "mediastore", relativePath = "Movies/Other")
@@ -181,8 +182,20 @@ class MoveWithoutDuplicatesTest {
         waitFor("the move notification to come back", 30_000) {
             true.takeIf { Device.hasNotification(context, Notifications.ID_MOVE) }
         }
+        assertFalse("The notification came back with sound", Device.notificationAlerts(context, Notifications.ID_MOVE))
+
+        // A new video joins the prompt that is up: that update must make a sound.
+        val second = TestVideo(context, "removed_new")
+        FakeTikTok.startSave(second.name, mode = "mediastore")
+        second.awaitSaved()
+        waitFor("the notification to announce both videos", 90_000) {
+            true.takeIf { Device.notificationTitle(context, Notifications.ID_MOVE)?.startsWith("2 ") == true }
+        }
+        assertTrue("The new video made no sound", Device.notificationAlerts(context, Notifications.ID_MOVE))
+
         Device.tapNotification(context, Notifications.ID_MOVE)
-        video.awaitMoved()
+        first.awaitMoved()
+        second.awaitMoved()
     }
 
     /** Taps the move notification as soon as it is shown, the way a user would. */

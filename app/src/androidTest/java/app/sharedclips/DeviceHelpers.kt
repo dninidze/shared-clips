@@ -1,6 +1,7 @@
 package app.sharedclips
 
 import android.app.ActivityOptions
+import android.app.Notification
 import android.app.NotificationManager
 import android.content.ContentResolver
 import android.content.Context
@@ -220,6 +221,23 @@ object Device {
 
     fun hasNotification(context: Context, id: Int): Boolean =
         context.getSystemService(NotificationManager::class.java).activeNotifications.any { it.id == id }
+
+    /** The notification's title, or null while it is not shown. */
+    fun notificationTitle(context: Context, id: Int): String? =
+        context.getSystemService(NotificationManager::class.java).activeNotifications
+            .firstOrNull { it.id == id }?.notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+
+    /**
+     * Whether the notification as last posted makes a sound: not posted silently, and not limited to
+     * alerting only on its first post.
+     */
+    fun notificationAlerts(context: Context, id: Int): Boolean {
+        val posted = context.getSystemService(NotificationManager::class.java).activeNotifications
+            .first { it.id == id }.notification
+        val silent = posted.groupAlertBehavior == Notification.GROUP_ALERT_SUMMARY
+        val onlyOnce = (posted.flags and Notification.FLAG_ONLY_ALERT_ONCE) != 0
+        return !silent && !onlyOnce
+    }
 
     /**
      * Taps the notification the app posted: sends its own tap intent, with the ids it announced, the

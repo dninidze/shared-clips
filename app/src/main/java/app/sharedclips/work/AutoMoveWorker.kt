@@ -108,7 +108,7 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if (left.isNotEmpty()) {
                 val result = Notifications.showMovePrompt(context, left.map { ContentUris.parseId(it) })
                 log.append("\n  ${left.size} left in Camera ${result.log}")
-                acted = acted || result == Notifications.Result.POSTED || result == Notifications.Result.POSTED_SILENTLY
+                acted = acted || result == Notifications.Result.POSTED
             } else {
                 Notifications.withdrawMovePromptIfDone(context)
             }

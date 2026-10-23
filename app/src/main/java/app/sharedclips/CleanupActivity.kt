@@ -85,6 +85,7 @@ class CleanupActivity : ComponentActivity() {
     }
 
     private suspend fun prepareMove(announced: List<Long>?) {
+        if (announced != null) Notifications.moveTapped(this, announced)
         val nowMs = System.currentTimeMillis()
         // The videos the notification announced; without that list, the same recent window the
         // automatic job uses, so older videos someone keeps in Camera are left alone.
