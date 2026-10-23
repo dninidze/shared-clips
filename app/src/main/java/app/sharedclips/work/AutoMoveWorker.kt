@@ -2,6 +2,7 @@ package app.sharedclips.work
 
 import android.content.Context
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
 import androidx.work.WorkerParameters
 import app.sharedclips.action.MediaMover
 import app.sharedclips.data.ActivityLog
@@ -24,12 +25,18 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if (CleanupSettings(applicationContext).autoMove) moveNewVideos(recheck)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Never fail: the re-armed watcher below is queued behind this run and would fail with it.
             ActivityLog.add(applicationContext, "Auto-move failed: ${e.javaClass.simpleName}: ${e.message}")
         } finally {
-            // Content-URI triggers fire once, so the watcher re-arms itself for the next download.
-            if (!recheck && CleanupSettings(applicationContext).autoMove) {
-                CleanupScheduler.watchForNewVideos(applicationContext)
+            if (CleanupSettings(applicationContext).autoMove) {
+                if (recheck) {
+                    // Safety net: restarts the watcher if it was lost; leaves a waiting one alone.
+                    CleanupScheduler.watchForNewVideos(applicationContext, ExistingWorkPolicy.KEEP)
+                } else {
+                    // Content-URI triggers fire once, so the watcher re-arms itself for the next download.
+                    CleanupScheduler.watchForNewVideos(applicationContext)
+                }
             }
         }
         return Result.success()
@@ -40,9 +47,18 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val scanner = MediaStoreScanner(context)
         val nowMs = System.currentTimeMillis()
         // Only confirmed matches move automatically; "not sure" ones wait for the user.
-        val found = scanner.scanCameraFolder(addedAfterSec = nowMs / 1000 - RECENT_WINDOW_SEC)
-            .filter { it.detection.verdict == Verdict.TIKTOK }
-        if (found.isEmpty()) return
+        val (found, unsure) = scanner.scanCameraFolder(addedAfterSec = nowMs / 1000 - RECENT_WINDOW_SEC)
+            .partition { it.detection.verdict == Verdict.TIKTOK }
+        if (found.isEmpty()) {
+            if (unsure.isNotEmpty()) {
+                ActivityLog.add(
+                    context,
+                    "Video change: ${unsure.size} recent video(s) might be TikTok, left for the home screen" +
+                        unsure.joinToString("") { "\n  ${it.describe(nowMs)}" },
+                )
+            }
+            return
+        }
 
         val (ready, saving) = found.partition { it.isSettled(nowMs) }
         val log = StringBuilder(if (recheck) "Re-check" else "Video change")
@@ -63,8 +79,12 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
             val uris = ready.map { it.uri }
             val mover = MediaMover(context)
             if (mover.hasAllFilesAccess()) {
-                val moved = mover.moveOutOfCamera(uris)
-                log.append("\n  Moved $moved directly (All files access)")
+                try {
+                    log.append("\n  Moved ${mover.moveOutOfCamera(uris)} directly (All files access)")
+                } catch (e: Exception) {
+                    // For example MediaProvider restarting; the notification below still offers the move.
+                    log.append("\n  Direct move failed: ${e.javaClass.simpleName}: ${e.message}")
+                }
             } else {
                 log.append("\n  Needs a tap: All files access is off")
             }

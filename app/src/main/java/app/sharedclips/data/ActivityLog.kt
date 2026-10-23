@@ -18,12 +18,19 @@ object ActivityLog {
     private val lock = Any()
     private val timeFormat = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
 
-    fun add(context: Context, message: String) = synchronized(lock) {
+    fun add(context: Context, message: String) {
         Log.i(TAG, message)
-        val file = file(context)
-        val stamp = timeFormat.format(Date())
-        val lines = readLines(file) + message.lines().map { "$stamp $it" }
-        file.writeText(lines.takeLast(MAX_LINES).joinToString("\n", postfix = "\n"))
+        synchronized(lock) {
+            // The log is a diagnostic aid; failing to write it must never break a move.
+            try {
+                val file = file(context)
+                val stamp = timeFormat.format(Date())
+                val lines = readLines(file) + message.lines().map { "$stamp $it" }
+                file.writeText(lines.takeLast(MAX_LINES).joinToString("\n", postfix = "\n"))
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not write the activity log", e)
+            }
+        }
     }
 
     /** Newest last. */

@@ -86,7 +86,8 @@ class AllFilesAccessTest {
     private fun saveAndAwaitSilentMove(video: TestVideo, chunks: Int): Long {
         setAutoMove(context, true)
         FakeTikTok.startSave(video.name, mode = "tiktok_replica", chunks = chunks, gapMs = 3_000)
-        val bytes = video.awaitSaved()
+        val bytes = video.awaitSaved { notified = notified || Device.hasOurNotification(context) }
+        video.assertSavedByTikTok()
         video.awaitMoved(timeoutMs = 120_000) { notified = notified || Device.hasOurNotification(context) }
         video.monitor.watch(10_000)
         assertFalse("The app posted a notification instead of moving", notified)

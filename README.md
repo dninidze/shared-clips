@@ -31,8 +31,9 @@ Android Studio generates the Gradle wrapper on first sync; from the command line
 - Unit tests (detector, save-finished rule): `gradle :app:testDebugUnitTest`.
 - Device tests run on Android emulators (API 31 and 34) in GitHub Actions on every push. They install
   `:faketiktok`, a test-only app with TikTok's package name (`com.zhiliaoapp.musically`), which saves a
-  sample video into DCIM/Camera in several ways (TikTok's own save sequence, MediaStore, slow stream,
-  IS_PENDING, raw path reopened per chunk, and saving the same video again after it was moved). The tests
+  sample video into DCIM/Camera in several ways (TikTok's own save sequence, including an empty entry that
+  waits before the copy starts, MediaStore, slow stream, IS_PENDING, a raw path reopened per chunk while the
+  gallery already lists it, and saving the same video again after it was moved). The tests
   check each save ends up as complete files in TikTok Downloads only, with matching gallery entries, that two
   copies never exist at once, and that the notification tap needs no confirmation popup.
   `AllFilesAccessTest` runs in a second pass with "All files access" granted and checks nothing needs a tap.

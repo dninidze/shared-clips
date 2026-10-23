@@ -10,6 +10,8 @@ import android.provider.MediaStore
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -23,10 +25,14 @@ import kotlin.concurrent.thread
  * - mediastore_slow: MediaStore insert, one output stream written in chunks with pauses
  * - mediastore_pending: like mediastore_slow, but hidden with IS_PENDING until finished
  * - file_chunked: raw file path, reopened in append mode for every chunk (a multi-session save)
+ * - file_chunked_visible: like file_chunked, but the gallery is told about the file after the first
+ *   chunk, so it is listed while still being written. Moving it then makes the next chunk create a
+ *   new, partial file at the old path: the kind of duplicate the app must never cause.
  * - tiktok_replica: what TikTok's own save does (traced from the real app): look for DCIM/Camera/<name>
  *   and reuse it if found; otherwise insert a row with only name, date taken, mime type and
  *   relative path (no IS_PENDING) and copy the bytes in. Run twice with the same name, it shows what
  *   happens when a video was moved away and TikTok saves it again (for example when sharing).
+ *   With --el startDelayMs, the empty row sits in the gallery that long before the copy starts.
  * - cleanup: deletes every file this app saved whose name starts with "sc_test_"
  */
 class SaveActivity : Activity() {
@@ -38,6 +44,7 @@ class SaveActivity : Activity() {
         val mode = intent.getStringExtra("mode") ?: "mediastore"
         val chunks = intent.getIntExtra("chunks", 1).coerceAtLeast(1)
         val gapMs = intent.getLongExtra("gapMs", 0L)
+        val startDelayMs = intent.getLongExtra("startDelayMs", 0L)
 
         thread(name = "fake-tiktok-save") {
             val bytes = try {
@@ -45,8 +52,9 @@ class SaveActivity : Activity() {
                     "mediastore" -> saveViaMediaStore(name, chunks = 1, gapMs = 0, pending = false)
                     "mediastore_slow" -> saveViaMediaStore(name, chunks, gapMs, pending = false)
                     "mediastore_pending" -> saveViaMediaStore(name, chunks, gapMs, pending = true)
-                    "file_chunked" -> saveViaFilePath(name, chunks, gapMs)
-                    "tiktok_replica" -> saveLikeTikTok(name, chunks, gapMs)
+                    "file_chunked" -> saveViaFilePath(name, chunks, gapMs, visibleEarly = false)
+                    "file_chunked_visible" -> saveViaFilePath(name, chunks, gapMs, visibleEarly = true)
+                    "tiktok_replica" -> saveLikeTikTok(name, chunks, gapMs, startDelayMs)
                     "cleanup" -> cleanUp()
                     else -> error("Unknown mode $mode")
                 }
@@ -78,6 +86,7 @@ class SaveActivity : Activity() {
             if (pending) put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val uri = contentResolver.insert(collection(), values) ?: error("insert failed")
+        Thread.sleep(startDelayMs)
         contentResolver.openOutputStream(uri, "w")!!.use { out ->
             val parts = split(data, chunks)
             parts.forEachIndexed { i, part ->
@@ -92,7 +101,7 @@ class SaveActivity : Activity() {
         return data.size.toLong()
     }
 
-    private fun saveViaFilePath(name: String, chunks: Int, gapMs: Long): Long {
+    private fun saveViaFilePath(name: String, chunks: Int, gapMs: Long, visibleEarly: Boolean): Long {
         val data = sample()
         @Suppress("DEPRECATION")
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Camera")
@@ -103,13 +112,20 @@ class SaveActivity : Activity() {
             // Reopening by path is what makes an early move dangerous: if the file was moved away,
             // this creates a new file at the old path.
             FileOutputStream(file, true).use { it.write(part) }
+            if (i == 0 && visibleEarly) scanAndWait(file)
             if (i < parts.lastIndex) Thread.sleep(gapMs)
         }
         MediaScannerConnection.scanFile(this, arrayOf(file.path), arrayOf("video/mp4"), null)
         return data.size.toLong()
     }
 
-    private fun saveLikeTikTok(name: String, chunks: Int, gapMs: Long): Long {
+    private fun scanAndWait(file: File) {
+        val done = CountDownLatch(1)
+        MediaScannerConnection.scanFile(this, arrayOf(file.path), arrayOf("video/mp4")) { _, _ -> done.countDown() }
+        done.await(10, TimeUnit.SECONDS)
+    }
+
+    private fun saveLikeTikTok(name: String, chunks: Int, gapMs: Long, startDelayMs: Long): Long {
         val data = sample()
         contentResolver.query(
             collection(),
@@ -130,6 +146,7 @@ class SaveActivity : Activity() {
             put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera/")
         }
         val uri = contentResolver.insert(collection(), values) ?: error("insert failed")
+        Thread.sleep(startDelayMs)
         contentResolver.openOutputStream(uri, "w")!!.use { out ->
             val parts = split(data, chunks)
             parts.forEachIndexed { i, part ->

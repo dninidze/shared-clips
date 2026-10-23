@@ -61,9 +61,12 @@ class MoveWithoutDuplicatesTest {
     @Test
     fun notificationTap_whileStillSaving_leavesTheVideoAlone() {
         val video = TestVideo(context, "tap_early")
-        FakeTikTok.startSave(video.name, mode = "file_chunked", chunks = 8, gapMs = 3_000)
+        // Listed in the gallery after the first part, then reopened by path for each further part:
+        // moving it now would make the next part create a second, partial file in Camera.
+        FakeTikTok.startSave(video.name, mode = "file_chunked_visible", chunks = 8, gapMs = 3_000)
         waitFor("the first part of the video to appear", 30_000) { video.monitor.sample().firstOrNull() }
         video.monitor.watch(3_000)
+        video.assertSavedByTikTok()
 
         // A tap while the video is still being written must not move it.
         Device.openMoveNotification(context)
@@ -82,7 +85,7 @@ class MoveWithoutDuplicatesTest {
 
     @Test
     fun autoMode_saveReopenedPerChunk_movesOneCompleteCopy() {
-        autoMoveScenario(TestVideo(context, "auto_chunked"), mode = "file_chunked")
+        autoMoveScenario(TestVideo(context, "auto_chunked"), mode = "file_chunked_visible")
     }
 
     @Test
@@ -98,6 +101,16 @@ class MoveWithoutDuplicatesTest {
     @Test
     fun autoMode_tikTokStyleSave_movesOneCompleteCopy() {
         autoMoveScenario(TestVideo(context, "auto_tiktok"), mode = "tiktok_replica")
+    }
+
+    @Test
+    fun autoMode_tikTokStartsWritingLate_waitsForTheVideo() {
+        // The empty gallery entry sits in Camera longer than the quiet period before the copy starts.
+        autoMoveScenario(
+            TestVideo(context, "auto_late"),
+            mode = "tiktok_replica",
+            startDelayMs = SettlePolicy.QUIET_PERIOD_MS + 5_000,
+        )
     }
 
     @Test
@@ -120,16 +133,18 @@ class MoveWithoutDuplicatesTest {
         )
     }
 
-    /** Automatic mode while fake TikTok saves in 8 parts over ~21 s. */
-    private fun autoMoveScenario(video: TestVideo, mode: String) {
+    /**
+     * Automatic mode while fake TikTok saves in 8 parts over ~21 s. Without All files access the app
+     * posts a notification; the test taps it as soon as it appears, even mid-save, like a user would.
+     */
+    private fun autoMoveScenario(video: TestVideo, mode: String, startDelayMs: Long = 0) {
         setAutoMove(context, true)
-        FakeTikTok.startSave(video.name, mode = mode, chunks = 8, gapMs = 3_000)
-        val bytes = video.awaitSaved()
+        FakeTikTok.startSave(video.name, mode = mode, chunks = 8, gapMs = 3_000, startDelayMs = startDelayMs)
+        val tapIfNotified = { if (Device.hasOurNotification(context)) Device.openMoveNotification(context) }
+        val bytes = video.awaitSaved(onTick = tapIfNotified)
+        video.assertSavedByTikTok()
 
-        // Without All files access the app posts the notification; tap it like the user would.
-        video.awaitMoved(timeoutMs = 120_000) {
-            if (Device.hasOurNotification(context)) Device.openMoveNotification(context)
-        }
+        video.awaitMoved(timeoutMs = 120_000, onTick = tapIfNotified)
         // Keep watching: a copy left behind or recreated in Camera would show up here.
         video.monitor.watch(10_000)
         video.assertMovedOnce(bytes)

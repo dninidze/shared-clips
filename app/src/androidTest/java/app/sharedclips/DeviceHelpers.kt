@@ -29,13 +29,17 @@ object Shell {
 
 /** Drives the test-only fake TikTok app (module :faketiktok), installed as com.zhiliaoapp.musically. */
 object FakeTikTok {
-    private const val COMPONENT = "com.zhiliaoapp.musically/app.sharedclips.faketiktok.SaveActivity"
+    const val PACKAGE = "com.zhiliaoapp.musically"
+    private const val COMPONENT = "$PACKAGE/app.sharedclips.faketiktok.SaveActivity"
 
     // NEW_TASK | MULTIPLE_TASK, so every save gets its own activity even if an earlier one is still running.
     private const val FLAGS = "0x18000000"
 
-    fun startSave(name: String, mode: String, chunks: Int = 1, gapMs: Long = 0) {
-        Shell.run("am start -W -f $FLAGS -n $COMPONENT --es name $name --es mode $mode --ei chunks $chunks --el gapMs $gapMs")
+    fun startSave(name: String, mode: String, chunks: Int = 1, gapMs: Long = 0, startDelayMs: Long = 0) {
+        Shell.run(
+            "am start -W -f $FLAGS -n $COMPONENT --es name $name --es mode $mode --ei chunks $chunks " +
+                "--el gapMs $gapMs --el startDelayMs $startDelayMs"
+        )
     }
 
     /**
@@ -66,9 +70,17 @@ data class Copy(val folder: String, val name: String, val bytes: Long) {
 
 /** Where copies of a test video are, read straight from disk by the shell (ground truth). */
 object Copies {
-    fun onDisk(prefix: String): List<Copy> {
-        var dir = ""
-        return Shell.run("ls -lR /sdcard/DCIM/Camera /sdcard/Movies").lineSequence().mapNotNull { line ->
+    /**
+     * Lists the destination first, then the source, in two commands. A move from Camera to TikTok
+     * Downloads between them can only hide the file from one sample, never show it twice; a real
+     * second copy is still seen.
+     */
+    fun onDisk(prefix: String): List<Copy> =
+        list("ls -lR /sdcard/Movies", prefix) + list("ls -l /sdcard/DCIM/Camera", prefix, "/sdcard/DCIM/Camera")
+
+    private fun list(command: String, prefix: String, startDir: String = ""): List<Copy> {
+        var dir = startDir
+        return Shell.run(command).lineSequence().mapNotNull { line ->
             if (line.endsWith(":")) {
                 dir = line.removeSuffix(":")
                 null
@@ -82,6 +94,19 @@ object Copies {
                 }
             }
         }.toList()
+    }
+
+    /** Which app MediaStore says saved each copy; null when Android hides it from us. */
+    fun owners(context: Context, prefix: String): List<String?> {
+        val owners = mutableListOf<String?>()
+        context.contentResolver.query(
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+            arrayOf(MediaStore.Video.Media.OWNER_PACKAGE_NAME),
+            "${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?",
+            arrayOf("$prefix%"),
+            null,
+        )?.use { c -> while (c.moveToNext()) owners += c.getString(0) }
+        return owners
     }
 
     /** What gallery apps see: MediaStore rows for the test video. */
@@ -102,15 +127,14 @@ object Copies {
     }
 }
 
-/**
- * Samples the disk while a test runs and remembers the most copies ever seen at once. A count only
- * counts once two samples in a row agree: one listing covers both folders, so a move that happens
- * while `ls` is between them shows the same file in both.
- */
+/** Samples the disk while a test runs and remembers the most copies ever seen at once. */
 class CopyMonitor(private val prefix: String) {
     var maxCopies = 0
         private set
-    private var previousCount = 0
+
+    /** Smallest size a copy in TikTok Downloads ever had; smaller than the video means moved mid-save. */
+    var smallestMovedBytes = Long.MAX_VALUE
+        private set
     private val timeline = mutableListOf<String>()
     private val start = SystemClock.uptimeMillis()
 
@@ -122,8 +146,8 @@ class CopyMonitor(private val prefix: String) {
             timeline += entry
             Log.i(TEST_TAG, "$prefix $entry")
         }
-        maxCopies = maxOf(maxCopies, minOf(copies.size, previousCount))
-        previousCount = copies.size
+        maxCopies = maxOf(maxCopies, copies.size)
+        copies.filter { it.inTikTokDownloads }.forEach { smallestMovedBytes = minOf(smallestMovedBytes, it.bytes) }
         return copies
     }
 
@@ -211,10 +235,17 @@ class TestVideo(private val context: Context, tag: String) {
     val name = "$prefix.mp4"
     val monitor = CopyMonitor(prefix)
 
-    fun awaitSaved(nth: Int = 1): Long =
-        waitFor("fake TikTok to finish saving $name", 90_000, onTick = { monitor.sample() }) {
+    fun awaitSaved(nth: Int = 1, onTick: () -> Unit = {}): Long =
+        waitFor("fake TikTok to finish saving $name", 90_000, onTick = { monitor.sample(); onTick() }) {
             FakeTikTok.savedBytes(name, nth)
         }
+
+    /** Android must tell the app that TikTok saved the video; detection relies on it. */
+    fun assertSavedByTikTok() {
+        val owners = Copies.owners(context, prefix)
+        assertTrue("No gallery entry for $name", owners.isNotEmpty())
+        assertTrue("Saving app hidden or wrong: $owners", owners.all { it == FakeTikTok.PACKAGE })
+    }
 
     /** Waits until no copy is left in Camera and [count] copies are in TikTok Downloads. */
     fun awaitMoved(timeoutMs: Long = 30_000, count: Int = 1, onTick: () -> Unit = {}) {
@@ -235,6 +266,7 @@ class TestVideo(private val context: Context, tag: String) {
         assertTrue("Not in TikTok Downloads. $timeline", disk.single().inTikTokDownloads)
         assertEquals("Moved file is incomplete. $timeline", bytes, disk.single().bytes)
         assertTrue("Two copies existed at the same time. $timeline", monitor.maxCopies <= 1)
+        assertTrue("Moved before it finished saving. $timeline", monitor.smallestMovedBytes >= bytes)
 
         val rows = Copies.inMediaStore(context, prefix)
         assertEquals("Gallery (MediaStore) entries: $rows. $timeline", 1, rows.size)
@@ -251,6 +283,7 @@ class TestVideo(private val context: Context, tag: String) {
         assertTrue("A copy is still in Camera. $timeline", disk.none { it.inCamera })
         assertEquals("Copies in TikTok Downloads. $timeline", 2, disk.count { it.inTikTokDownloads })
         assertTrue("A moved file is incomplete. $timeline", disk.all { it.bytes == bytes })
+        assertTrue("Moved before it finished saving. $timeline", monitor.smallestMovedBytes >= bytes)
 
         val rows = Copies.inMediaStore(context, prefix)
         assertEquals("Gallery (MediaStore) entries: $rows. $timeline", 2, rows.size)
