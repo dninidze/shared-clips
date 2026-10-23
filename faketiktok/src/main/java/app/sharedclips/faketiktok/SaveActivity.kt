@@ -86,7 +86,6 @@ class SaveActivity : Activity() {
             if (pending) put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val uri = contentResolver.insert(collection(), values) ?: error("insert failed")
-        Thread.sleep(startDelayMs)
         contentResolver.openOutputStream(uri, "w")!!.use { out ->
             val parts = split(data, chunks)
             parts.forEachIndexed { i, part ->
