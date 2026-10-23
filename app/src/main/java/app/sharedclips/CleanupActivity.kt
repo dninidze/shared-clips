@@ -8,6 +8,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import app.sharedclips.action.MediaMover
+import app.sharedclips.data.ActivityLog
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
 import app.sharedclips.detect.Verdict
@@ -26,7 +27,11 @@ class CleanupActivity : ComponentActivity() {
         lifecycleScope.launch {
             if (result.resultCode == Activity.RESULT_OK) {
                 val moved = mover.moveOutOfCamera(pending)
+                val left = scanner.stillInCamera(pending)
+                ActivityLog.add(this@CleanupActivity, "  Notification move: moved $moved, $left left in Camera")
                 toast("Moved $moved videos to TikTok Downloads")
+            } else {
+                ActivityLog.add(this@CleanupActivity, "  Notification move: permission dialog declined")
             }
             finish()
         }
@@ -35,7 +40,9 @@ class CleanupActivity : ComponentActivity() {
     private val trashLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) toast("Moved ${pending.size} videos to the trash")
+        val approved = result.resultCode == Activity.RESULT_OK
+        ActivityLog.add(this, "  Notification delete: ${if (approved) "trashed ${pending.size}" else "declined"}")
+        if (approved) toast("Moved ${pending.size} videos to the trash")
         finish()
     }
 
@@ -45,9 +52,16 @@ class CleanupActivity : ComponentActivity() {
         lifecycleScope.launch {
             when (intent?.action) {
                 ACTION_MOVE_NEW -> {
-                    pending = scanner.scanCameraFolder()
-                        .filter { it.detection.verdict == Verdict.TIKTOK }
-                        .map { it.uri }
+                    val found = scanner.scanCameraFolder().filter { it.detection.verdict == Verdict.TIKTOK }
+                    // Never move a video its app is still writing: that is what leaves a copy behind.
+                    val (ready, saving) = found.partition { it.isSettled() }
+                    pending = ready.map { it.uri }
+                    ActivityLog.add(
+                        this@CleanupActivity,
+                        "Notification tapped: ${ready.size} saved, ${saving.size} still saving" +
+                            saving.joinToString("") { "\n  waiting: ${it.describe()}" },
+                    )
+                    if (saving.isNotEmpty()) toast("${saving.size} video(s) still saving, they'll move when done")
                     launch(mover.writeRequest(pending), moveLauncher)
                 }
                 ACTION_DELETE_EXPIRED -> {

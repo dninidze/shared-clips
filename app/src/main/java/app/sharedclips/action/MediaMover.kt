@@ -19,7 +19,9 @@ class MediaMover(private val context: Context) {
 
     /** Dialog asking the user to let us modify [uris]; launch it, then call [moveOutOfCamera]. */
     fun writeRequest(uris: List<Uri>): PendingIntent? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (uris.isEmpty()) {
+            null // MediaStore throws on an empty request
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             MediaStore.createWriteRequest(context.contentResolver, uris)
         } else {
             null // Android 10: a RecoverableSecurityException per file is surfaced by moveOutOfCamera
@@ -27,7 +29,9 @@ class MediaMover(private val context: Context) {
 
     /** Dialog moving [uris] to the system trash (recoverable for 30 days). Android 11+. */
     fun trashRequest(uris: List<Uri>): PendingIntent? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (uris.isEmpty()) {
+            null
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             MediaStore.createTrashRequest(context.contentResolver, uris, true)
         } else {
             null

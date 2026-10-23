@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import app.sharedclips.action.MediaMover
+import app.sharedclips.data.ActivityLog
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
 import java.util.concurrent.TimeUnit
@@ -24,6 +25,11 @@ class ExpiryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         if (request != null) mover.sendSilently(request)
         val left = scanner.countExisting(uris)
         if (left > 0) Notifications.showDeletePrompt(applicationContext, left, days)
+        ActivityLog.add(
+            applicationContext,
+            "Auto-delete: ${uris.size} older than $days days, ${uris.size - left} trashed" +
+                if (left > 0) ", $left left -> notification" else "",
+        )
         return Result.success()
     }
 

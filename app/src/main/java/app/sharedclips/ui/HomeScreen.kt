@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.sharedclips.HomeState
 import app.sharedclips.data.CleanupMode
@@ -61,6 +62,8 @@ fun HomeScreen(
     onAutoMoveChange: (Boolean) -> Unit,
     onDeleteAfterChange: (Int) -> Unit,
     onRequestManageMedia: () -> Unit,
+    onShareLog: () -> Unit,
+    onClearLog: () -> Unit,
 ) {
     val context = LocalContext.current
     Scaffold { padding ->
@@ -71,7 +74,17 @@ fun HomeScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { Text("Shared Clips", style = MaterialTheme.typography.headlineMedium) }
+            item {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("Shared Clips", style = MaterialTheme.typography.headlineMedium)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "v${state.versionName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
             item {
                 AutomationSection(
@@ -115,6 +128,9 @@ fun HomeScreen(
             }
 
             items(state.videos, key = { it.id }) { VideoRow(it) }
+
+            item { HorizontalDivider() }
+            item { ActivityLogSection(state.log, onShareLog, onClearLog) }
         }
     }
 }
@@ -227,7 +243,8 @@ private fun VideoRow(video: ScannedVideo) {
             Text(video.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
             Text(
                 Formatter.formatShortFileSize(context, video.sizeBytes) +
-                    if (video.detection.verdict == Verdict.UNSURE) " · not sure" else "",
+                    (if (video.detection.verdict == Verdict.UNSURE) " · not sure" else "") +
+                    (if (!video.isSettled()) " · still saving" else ""),
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
@@ -238,3 +255,30 @@ private fun VideoRow(video: ScannedVideo) {
         }
     }
 }
+
+@Composable
+private fun ActivityLogSection(log: List<String>, onShare: () -> Unit, onClear: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Activity log", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "What the app saw and did. Share it if something goes wrong.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onShare, enabled = log.isNotEmpty()) { Text("Share log") }
+            OutlinedButton(onClick = onClear, enabled = log.isNotEmpty()) { Text("Clear") }
+        }
+        if (log.isEmpty()) {
+            Text("Nothing yet.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            Text(
+                log.takeLast(LOG_LINES_SHOWN).reversed().joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+private const val LOG_LINES_SHOWN = 40

@@ -2,9 +2,11 @@ package app.sharedclips
 
 import android.app.Application
 import android.app.PendingIntent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.sharedclips.action.MediaMover
+import app.sharedclips.data.ActivityLog
 import app.sharedclips.data.CleanupMode
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
@@ -23,6 +25,8 @@ data class HomeState(
     val autoMove: Boolean = false,
     val deleteAfterDays: Int = 0,
     val canManageMedia: Boolean = false,
+    val log: List<String> = emptyList(),
+    val versionName: String = "",
 ) {
     val totalBytes: Long get() = videos.sumOf { it.sizeBytes }
 }
@@ -38,8 +42,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             autoMove = settings.autoMove,
             deleteAfterDays = settings.deleteAfterDays,
             canManageMedia = mover.canManageMedia(),
+            log = ActivityLog.read(app),
+            versionName = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }
+                .getOrNull().orEmpty(),
         )
     )
+
+    /** The videos a move or delete request was made for, so the approved set is what gets moved. */
+    private var requested: List<Uri> = emptyList()
     val state: StateFlow<HomeState> = _state
 
     init {
@@ -76,21 +86,45 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun moveRequest(): PendingIntent? = mover.writeRequest(_state.value.videos.map { it.uri })
+    fun moveRequest(): PendingIntent? = mover.writeRequest(readyToClean())
 
-    fun trashRequest(): PendingIntent? = mover.trashRequest(_state.value.videos.map { it.uri })
+    fun trashRequest(): PendingIntent? = mover.trashRequest(readyToClean())
+
+    /** Videos that have finished saving; one still being written is left for the next tap. */
+    private fun readyToClean(): List<Uri> {
+        val (ready, saving) = _state.value.videos.partition { it.isSettled() }
+        if (saving.isNotEmpty()) {
+            _state.update { it.copy(message = "${saving.size} video(s) still saving, skipped for now") }
+        }
+        requested = ready.map { it.uri }
+        return requested
+    }
+
+    fun refreshLog() {
+        _state.update { it.copy(log = ActivityLog.read(getApplication())) }
+    }
+
+    fun clearLog() {
+        ActivityLog.clear(getApplication())
+        refreshLog()
+    }
 
     /** Called after the user approved the write request. */
     fun onMoveApproved() {
         viewModelScope.launch {
-            val moved = mover.moveOutOfCamera(_state.value.videos.map { it.uri })
+            val moved = mover.moveOutOfCamera(requested)
+            val left = scanner.stillInCamera(requested)
+            ActivityLog.add(getApplication(), "Home screen move: moved $moved, $left left in Camera")
             _state.update { it.copy(message = "Moved $moved videos to TikTok Downloads") }
+            refreshLog()
             scan()
         }
     }
 
     fun onTrashApproved() {
-        _state.update { it.copy(message = "Moved ${it.videos.size} videos to trash") }
+        ActivityLog.add(getApplication(), "Home screen delete: trashed ${requested.size}")
+        _state.update { it.copy(message = "Moved ${requested.size} videos to trash") }
+        refreshLog()
         scan()
     }
 }

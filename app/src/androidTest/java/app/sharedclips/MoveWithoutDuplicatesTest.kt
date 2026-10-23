@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
+import app.sharedclips.detect.SettlePolicy
 import app.sharedclips.work.CleanupScheduler
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -154,6 +155,6 @@ class MoveWithoutDuplicatesTest {
 
     private companion object {
         /** A little longer than the quiet period after which the app treats a save as finished. */
-        const val SAVE_SETTLE_MS = 16_000L
+        const val SAVE_SETTLE_MS = SettlePolicy.QUIET_PERIOD_MS + 1_000
     }
 }

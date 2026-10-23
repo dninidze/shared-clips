@@ -5,8 +5,10 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
+import android.system.Os
 import app.sharedclips.action.MediaMover
 import app.sharedclips.detect.Detection
+import app.sharedclips.detect.SettlePolicy
 import app.sharedclips.detect.TikTokDetector
 import app.sharedclips.detect.VideoFacts
 import app.sharedclips.detect.Verdict
@@ -21,15 +23,50 @@ data class ScannedVideo(
     val sizeBytes: Long,
     val dateAddedSec: Long,
     val detection: Detection,
-)
+    val ownerPackage: String? = null,
+    /** Last write to the file on disk, in epoch ms; 0 if unknown. */
+    val lastModifiedMs: Long = 0,
+) {
+    /** False while the saving app may still be writing; moving it then can leave a copy behind. */
+    fun isSettled(nowMs: Long = System.currentTimeMillis()) = SettlePolicy.isSettled(lastModifiedMs, nowMs)
+
+    /** One line for the activity log. */
+    fun describe(nowMs: Long = System.currentTimeMillis()): String {
+        val ageSec = if (lastModifiedMs > 0) "${(nowMs - lastModifiedMs) / 1000}s ago" else "unknown"
+        val state = if (isSettled(nowMs)) "saved" else "still saving"
+        return "$displayName | owner=${ownerPackage ?: "none"} | ${sizeBytes / 1024} KB | " +
+            "last written $ageSec | $state | ${detection.verdict}"
+    }
+}
 
 class MediaStoreScanner(private val context: Context) {
 
     private val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
 
-    /** Scans videos in the camera folder and returns the ones that look like TikTok saves. */
-    suspend fun scanCameraFolder(): List<ScannedVideo> =
-        query(folder = CAMERA_RELATIVE_PATH).filter { it.detection.verdict != Verdict.NOT_TIKTOK }
+    /**
+     * Scans videos in the camera folder and returns the ones that look like TikTok saves.
+     * [addedAfterSec] limits the scan to recent videos (epoch seconds), which keeps background runs cheap.
+     */
+    suspend fun scanCameraFolder(addedAfterSec: Long? = null): List<ScannedVideo> =
+        query(folder = CAMERA_RELATIVE_PATH, addedAfterSec = addedAfterSec)
+            .filter { it.detection.verdict != Verdict.NOT_TIKTOK }
+            .let { videos ->
+                // The later of the live file time and MediaStore's time, to err on "still saving".
+                withContext(Dispatchers.IO) {
+                    videos.map { it.copy(lastModifiedMs = maxOf(it.lastModifiedMs, lastModifiedMs(it.uri))) }
+                }
+            }
+
+    /** True if TikTok Downloads already has a video with this name (a sign of an earlier duplicate). */
+    suspend fun inTikTokDownloads(displayName: String): Boolean = withContext(Dispatchers.IO) {
+        context.contentResolver.query(
+            collection,
+            arrayOf(MediaStore.Video.Media._ID),
+            "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.DISPLAY_NAME} = ?",
+            arrayOf("${MediaMover.TARGET_RELATIVE_PATH}%", displayName),
+            null,
+        )?.use { it.count > 0 } ?: false
+    }
 
     /** Videos in the TikTok Downloads folder saved before [cutoffSec] (epoch seconds). */
     suspend fun findExpired(cutoffSec: Long): List<ScannedVideo> =
@@ -55,6 +92,7 @@ class MediaStoreScanner(private val context: Context) {
     private suspend fun query(
         folder: String,
         addedBeforeSec: Long? = null,
+        addedAfterSec: Long? = null,
         detect: Boolean = true,
     ): List<ScannedVideo> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
@@ -67,12 +105,17 @@ class MediaStoreScanner(private val context: Context) {
             MediaStore.Video.Media.DURATION,
             MediaStore.Video.Media.SIZE,
             MediaStore.Video.Media.DATE_ADDED,
+            MediaStore.Video.Media.DATE_MODIFIED,
         )
         var selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
         val args = mutableListOf("$folder%")
         if (addedBeforeSec != null) {
             selection += " AND ${MediaStore.Video.Media.DATE_ADDED} < ?"
             args += addedBeforeSec.toString()
+        }
+        if (addedAfterSec != null) {
+            selection += " AND ${MediaStore.Video.Media.DATE_ADDED} >= ?"
+            args += addedAfterSec.toString()
         }
         val sort = "${MediaStore.Video.Media.DATE_ADDED} DESC"
 
@@ -87,6 +130,7 @@ class MediaStoreScanner(private val context: Context) {
             val durCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
             val sizeCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
             val addedCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+            val modifiedCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_MODIFIED)
 
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
@@ -113,10 +157,25 @@ class MediaStoreScanner(private val context: Context) {
                     sizeBytes = c.getLong(sizeCol),
                     dateAddedSec = c.getLong(addedCol),
                     detection = detection,
+                    ownerPackage = facts.ownerPackage,
+                    lastModifiedMs = c.getLong(modifiedCol) * 1000,
                 )
             }
         }
         results
+    }
+
+    /**
+     * Last write time of the file itself. MediaStore's DATE_MODIFIED is only refreshed when a writer
+     * closes the file, so it can look old while a download is still being written; fstat is live.
+     */
+    private fun lastModifiedMs(uri: Uri): Long = try {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+            val mtime = Os.fstat(pfd.fileDescriptor).st_mtim
+            mtime.tv_sec * 1000 + mtime.tv_nsec / 1_000_000
+        } ?: 0L
+    } catch (e: Exception) {
+        0L
     }
 
     private fun readCaptureMetadata(uri: Uri): Boolean? = try {
