@@ -31,11 +31,14 @@ data class ScannedVideo(
 ) {
     private val bytes get() = if (liveBytes >= 0) liveBytes else sizeBytes
 
+    /** MediaStore records the size when the writer closes the file; matching the disk means it is closed. */
+    private val closed get() = liveBytes > 0 && liveBytes == sizeBytes
+
     /** False while the saving app may still be writing; such a video is left alone for now. */
-    fun isSettled(nowMs: Long = System.currentTimeMillis()) = SettlePolicy.isSettled(lastModifiedMs, bytes, nowMs)
+    fun isSettled(nowMs: Long = System.currentTimeMillis()) = SettlePolicy.isSettled(lastModifiedMs, bytes, nowMs, closed)
 
     fun msUntilSettled(nowMs: Long = System.currentTimeMillis()) =
-        SettlePolicy.msUntilSettled(lastModifiedMs, bytes, nowMs)
+        SettlePolicy.msUntilSettled(lastModifiedMs, bytes, nowMs, closed)
 
     /** An entry the saving app never wrote to (a failed save); never moved, and not waited for. */
     fun isAbandoned(nowMs: Long = System.currentTimeMillis()) =

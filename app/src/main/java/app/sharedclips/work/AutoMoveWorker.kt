@@ -144,7 +144,7 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
         /** Only videos added this recently are considered; older ones are left to the home screen. */
         const val RECENT_WINDOW_SEC = 24 * 60 * 60L
-        private const val RECHECK_MARGIN_MS = 2_000L
+        private const val RECHECK_MARGIN_MS = 1_000L
         private const val TAG = "SharedClips"
     }
 }

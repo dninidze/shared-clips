@@ -1,5 +1,7 @@
 package app.sharedclips
 
+import android.os.SystemClock
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.sharedclips.data.ActivityLog
@@ -45,6 +47,23 @@ class AllFilesAccessTest {
         val video = TestVideo(context, "silent")
         val bytes = saveAndAwaitSilentMove(video, chunks = 8)
         video.assertMovedOnce(bytes)
+    }
+
+    @Test
+    fun autoMode_finishedSave_isMovedWithinSeconds() {
+        // TikTok's own save: an empty entry, then one quick copy. Once the file is closed, the app
+        // only waits the short quiet period, so the video leaves Camera before most backups start.
+        val video = TestVideo(context, "fast")
+        setAutoMove(context, true)
+        FakeTikTok.startSave(video.name, mode = "tiktok_replica")
+        val bytes = video.awaitSaved()
+        val savedAt = SystemClock.uptimeMillis()
+        video.awaitMoved(timeoutMs = 60_000)
+        val seconds = (SystemClock.uptimeMillis() - savedAt) / 1000.0
+        Log.i(TEST_TAG, "Moved ${seconds}s after the save finished")
+        video.monitor.watch(10_000)
+        video.assertMovedOnce(bytes)
+        assertTrue("Took ${seconds}s after the save finished", seconds < 14)
     }
 
     @Test

@@ -51,6 +51,15 @@ class SettlePolicyTest {
     }
 
     @Test
+    fun closedFileNeedsOnlyTheShortWait() {
+        assertFalse(SettlePolicy.isSettled(now - 3_000, size, now, closed = true))
+        assertEquals(2_000, SettlePolicy.msUntilSettled(now - 3_000, size, now, closed = true))
+        assertTrue(SettlePolicy.isSettled(now - SettlePolicy.CLOSED_QUIET_PERIOD_MS, size, now, closed = true))
+        // Not known to be closed: the full wait.
+        assertFalse(SettlePolicy.isSettled(now - SettlePolicy.CLOSED_QUIET_PERIOD_MS, size, now))
+    }
+
+    @Test
     fun emptyEntryIsWaitedForAtFirst() {
         // TikTok's empty entry before the copy starts: still a save in progress.
         assertFalse(SettlePolicy.isAbandoned(0, now - 20_000, now))
