@@ -62,6 +62,7 @@ fun HomeScreen(
     onAutoMoveChange: (Boolean) -> Unit,
     onDeleteAfterChange: (Int) -> Unit,
     onRequestManageMedia: () -> Unit,
+    onRequestAllFilesAccess: () -> Unit,
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
 ) {
@@ -91,9 +92,11 @@ fun HomeScreen(
                     autoMove = state.autoMove,
                     deleteAfterDays = state.deleteAfterDays,
                     canManageMedia = state.canManageMedia,
+                    hasAllFilesAccess = state.hasAllFilesAccess,
                     onAutoMoveChange = onAutoMoveChange,
                     onDeleteAfterChange = onDeleteAfterChange,
                     onRequestManageMedia = onRequestManageMedia,
+                    onRequestAllFilesAccess = onRequestAllFilesAccess,
                 )
             }
 
@@ -141,9 +144,11 @@ private fun AutomationSection(
     autoMove: Boolean,
     deleteAfterDays: Int,
     canManageMedia: Boolean,
+    hasAllFilesAccess: Boolean,
     onAutoMoveChange: (Boolean) -> Unit,
     onDeleteAfterChange: (Int) -> Unit,
     onRequestManageMedia: () -> Unit,
+    onRequestAllFilesAccess: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -169,13 +174,29 @@ private fun AutomationSection(
             }
         }
 
-        if ((autoMove || deleteAfterDays > 0) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canManageMedia) {
-            Text(
-                "Allow \"Media management\" so this runs without asking each time. " +
-                    "Without it, you get a notification to tap instead.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            OutlinedButton(onClick = onRequestManageMedia) { Text("Allow media management") }
+        if (autoMove || deleteAfterDays > 0) {
+            when {
+                hasAllFilesAccess -> Text(
+                    "Fully automatic: \"All files access\" is on, so videos move and expire without a tap.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                    Text(
+                        "Android only lets an app move another app's videos in the background with " +
+                            "\"All files access\". Without it, you get a notification and one tap does it.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(onClick = onRequestAllFilesAccess) { Text("Allow all files access") }
+                }
+            }
+            if (!hasAllFilesAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !canManageMedia) {
+                Text(
+                    "Allow \"Media management\" so that tap goes through without a confirmation popup.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedButton(onClick = onRequestManageMedia) { Text("Allow media management") }
+            }
         }
     }
 }

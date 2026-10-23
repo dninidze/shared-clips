@@ -64,14 +64,19 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           # Each line runs on its own. Test failures are recorded, diagnostics printed to the job log
           # (readable without downloading artifacts), and the step fails at the end.
+          # AllFilesAccessTest runs on its own: once granted, that access cannot be taken back without
+          # killing the app, so it would change what every later test sees.
           script: |
             adb install -r faketiktok/build/outputs/apk/debug/faketiktok-debug.apk
             adb logcat -c || true
-            gradle :app:connectedDebugAndroidTest --stacktrace || touch tests-failed
+            gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=app.sharedclips.AllFilesAccessTest --stacktrace || touch tests-failed
+            mkdir -p test-results && cp -r app/build/outputs/androidTest-results/connected test-results/notification || true
+            gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=app.sharedclips.AllFilesAccessTest --stacktrace || touch tests-failed
+            cp -r app/build/outputs/androidTest-results/connected test-results/all-files-access || true
             adb logcat -d > logcat.txt || true
             adb shell dumpsys jobscheduler > jobscheduler.txt || true
-            echo "::group::Failed tests"; python3 .github/scripts/print_failures.py app/build/outputs/androidTest-results/connected; echo "::endgroup::"
-            echo "::group::App and test logcat"; grep -E "SharedClips|FakeTikTok|WM-|BackgroundActivity|Background activity|Abort background|ActivityTaskManager: START|MediaProvider.*(sc_test_|rename|Permission)|AndroidRuntime" logcat.txt | tail -n 600 || true; echo "::endgroup::"
+            echo "::group::Failed tests"; python3 .github/scripts/print_failures.py test-results; echo "::endgroup::"
+            echo "::group::App and test logcat"; grep -E "SharedClips|FakeTikTok|WM-[A-Za-z]+: .*(sharedclips|AutoMoveWorker|ExpiryWorker)|Background activity|Abort background|ActivityTaskManager: START.*(sharedclips|musically|providers.media)|MediaProvider.*(sc_test_|Permission|calling package)|PermissionActivity|AndroidRuntime" logcat.txt | tail -n 800 || true; echo "::endgroup::"
             echo "::group::Scheduled jobs"; grep -B2 -A12 "app.sharedclips" jobscheduler.txt | head -n 200 || true; echo "::endgroup::"
             test ! -f tests-failed
       - name: Upload test reports and logcat
@@ -81,6 +86,6 @@ jobs:
           name: device-tests-api-${{ matrix.api-level }}
           path: |
             app/build/reports/androidTests/
-            app/build/outputs/androidTest-results/
+            test-results/
             logcat.txt
             jobscheduler.txt

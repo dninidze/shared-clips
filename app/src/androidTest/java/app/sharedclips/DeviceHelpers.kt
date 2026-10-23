@@ -12,6 +12,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import app.sharedclips.action.MediaMover
+import app.sharedclips.data.CleanupSettings
+import app.sharedclips.work.CleanupScheduler
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import java.util.regex.Pattern
 
 /** Runs a shell command on the device as the shell user and returns its output. No shell quoting. */
@@ -33,10 +38,14 @@ object FakeTikTok {
         Shell.run("am start -W -f $FLAGS -n $COMPONENT --es name $name --es mode $mode --ei chunks $chunks --el gapMs $gapMs")
     }
 
-    /** Bytes written once the fake app has logged that the save finished, or null while it is still saving. */
-    fun savedBytes(name: String): Long? {
+    /**
+     * Bytes written once the fake app has logged that its [nth] save of [name] finished, or null
+     * while it is still saving.
+     */
+    fun savedBytes(name: String, nth: Int = 1): Long? {
         val line = Shell.run("logcat -d -s FakeTikTok:I").lineSequence()
-            .lastOrNull { it.contains("DONE $name bytes=") } ?: return null
+            .filter { it.contains("DONE $name bytes=") }
+            .elementAtOrNull(nth - 1) ?: return null
         val bytes = line.substringAfter("bytes=").trim().toLong()
         check(bytes >= 0) { "Fake TikTok failed to save $name; see logcat" }
         return bytes
@@ -93,10 +102,15 @@ object Copies {
     }
 }
 
-/** Samples the disk while a test runs and remembers the most copies ever seen at once. */
+/**
+ * Samples the disk while a test runs and remembers the most copies ever seen at once. A count only
+ * counts once two samples in a row agree: one listing covers both folders, so a move that happens
+ * while `ls` is between them shows the same file in both.
+ */
 class CopyMonitor(private val prefix: String) {
     var maxCopies = 0
         private set
+    private var previousCount = 0
     private val timeline = mutableListOf<String>()
     private val start = SystemClock.uptimeMillis()
 
@@ -108,7 +122,8 @@ class CopyMonitor(private val prefix: String) {
             timeline += entry
             Log.i(TEST_TAG, "$prefix $entry")
         }
-        maxCopies = maxOf(maxCopies, copies.size)
+        maxCopies = maxOf(maxCopies, minOf(copies.size, previousCount))
+        previousCount = copies.size
         return copies
     }
 
@@ -118,7 +133,11 @@ class CopyMonitor(private val prefix: String) {
 object Device {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
 
-    fun grantPermissions(context: Context) {
+    /**
+     * What the user grants in the app. [allFilesAccess] can only be turned on: taking it away kills
+     * the app, and the tests run inside it. So tests that need it run separately (see the CI workflow).
+     */
+    fun grantPermissions(context: Context, allFilesAccess: Boolean = false) {
         val pkg = context.packageName
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Shell.run("pm grant $pkg android.permission.READ_MEDIA_VIDEO")
@@ -126,11 +145,20 @@ object Device {
         } else {
             Shell.run("pm grant $pkg android.permission.READ_EXTERNAL_STORAGE")
         }
+        Shell.run("pm grant $pkg android.permission.ACCESS_MEDIA_LOCATION")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // "Media management" special access, so write and trash requests need no dialog.
             Shell.run("appops set $pkg MANAGE_MEDIA allow")
             if (!MediaStore.canManageMedia(context)) Shell.run("appops set $pkg android:manage_media allow")
             check(MediaStore.canManageMedia(context)) { "Could not grant MANAGE_MEDIA to $pkg" }
+        }
+        if (allFilesAccess) {
+            Shell.run("appops set $pkg MANAGE_EXTERNAL_STORAGE allow")
+            check(MediaMover(context).hasAllFilesAccess()) { "Could not grant All files access to $pkg" }
+        } else {
+            check(!MediaMover(context).hasAllFilesAccess()) {
+                "All files access is on; tests that expect the notification must run without it"
+            }
         }
     }
 
@@ -152,13 +180,81 @@ object Device {
             .setAction(CleanupActivity.ACTION_MOVE_NEW)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
-        allowSystemDialogIfShown()
+        val dialogShown = allowSystemDialogIfShown()
+        // Android 12+ with "Media management" and media location access: the tap alone must do it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            check(!dialogShown) { "The system asked for confirmation although Media management is allowed" }
+        }
     }
 
-    /** Taps "Allow" on a MediaStore consent dialog, if one appears (it should not with MANAGE_MEDIA). */
-    private fun allowSystemDialogIfShown() {
+    /** Taps "Allow" on a MediaStore consent dialog if one appears, and says whether it did. */
+    private fun allowSystemDialogIfShown(): Boolean {
         val device = UiDevice.getInstance(instrumentation)
-        device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 3_000)?.click()
+        val allow = device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 3_000) ?: return false
+        Log.i(TEST_TAG, "Consent dialog shown; tapping Allow")
+        allow.click()
+        return true
+    }
+}
+
+/** Turns automatic mode on or off the way the switch on the home screen does. */
+fun setAutoMove(context: Context, enabled: Boolean) {
+    val settings = CleanupSettings(context)
+    settings.autoMove = enabled
+    settings.deleteAfterDays = 0
+    CleanupScheduler.apply(context)
+}
+
+/** One test video, saved by fake TikTok under a unique name, and where its copies are. */
+class TestVideo(private val context: Context, tag: String) {
+    val prefix = "sc_test_${tag}_${System.currentTimeMillis()}"
+    val name = "$prefix.mp4"
+    val monitor = CopyMonitor(prefix)
+
+    fun awaitSaved(nth: Int = 1): Long =
+        waitFor("fake TikTok to finish saving $name", 90_000, onTick = { monitor.sample() }) {
+            FakeTikTok.savedBytes(name, nth)
+        }
+
+    /** Waits until no copy is left in Camera and [count] copies are in TikTok Downloads. */
+    fun awaitMoved(timeoutMs: Long = 30_000, count: Int = 1, onTick: () -> Unit = {}) {
+        try {
+            waitFor("$name to be moved to TikTok Downloads", timeoutMs, onTick = onTick) {
+                val copies = monitor.sample()
+                true.takeIf { copies.count { it.inTikTokDownloads } >= count && copies.none { it.inCamera } }
+            }
+        } catch (e: AssertionError) {
+            throw AssertionError("${e.message}\nTimeline:\n${monitor.report()}")
+        }
+    }
+
+    fun assertMovedOnce(bytes: Long) {
+        val timeline = "Timeline:\n${monitor.report()}"
+        val disk = monitor.sample()
+        assertEquals("Copies on disk at the end. $timeline", 1, disk.size)
+        assertTrue("Not in TikTok Downloads. $timeline", disk.single().inTikTokDownloads)
+        assertEquals("Moved file is incomplete. $timeline", bytes, disk.single().bytes)
+        assertTrue("Two copies existed at the same time. $timeline", monitor.maxCopies <= 1)
+
+        val rows = Copies.inMediaStore(context, prefix)
+        assertEquals("Gallery (MediaStore) entries: $rows. $timeline", 1, rows.size)
+        assertTrue("Gallery entry not in TikTok Downloads: $rows", rows.single().inTikTokDownloads)
+    }
+
+    /**
+     * After TikTok saved the video a second time: nothing in Camera, and each save is one complete
+     * file in TikTok Downloads (the second gets a " (1)" suffix).
+     */
+    fun assertBothSavesMoved(bytes: Long) {
+        val timeline = "Timeline:\n${monitor.report()}"
+        val disk = monitor.sample()
+        assertTrue("A copy is still in Camera. $timeline", disk.none { it.inCamera })
+        assertEquals("Copies in TikTok Downloads. $timeline", 2, disk.count { it.inTikTokDownloads })
+        assertTrue("A moved file is incomplete. $timeline", disk.all { it.bytes == bytes })
+
+        val rows = Copies.inMediaStore(context, prefix)
+        assertEquals("Gallery (MediaStore) entries: $rows. $timeline", 2, rows.size)
+        assertTrue("Gallery entry not in TikTok Downloads: $rows", rows.all { it.inTikTokDownloads })
     }
 }
 

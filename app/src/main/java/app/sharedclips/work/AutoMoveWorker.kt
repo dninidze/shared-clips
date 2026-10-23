@@ -7,14 +7,14 @@ import app.sharedclips.action.MediaMover
 import app.sharedclips.data.ActivityLog
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
-import app.sharedclips.detect.SettlePolicy
 import app.sharedclips.detect.Verdict
 import kotlinx.coroutines.CancellationException
 
 /**
  * Runs whenever MediaStore reports a video change, and again once a video still being saved should
- * have finished. Moves confirmed TikTok videos that have finished saving out of Camera, silently when
- * "Media management" allows it, otherwise through a one-tap notification.
+ * have finished. Moves confirmed TikTok videos that have finished saving out of Camera: directly when
+ * the user granted "All files access", otherwise through a one-tap notification (a background job
+ * cannot get a MediaStore write request granted).
  */
 class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
@@ -49,11 +49,12 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
             .append(": ${found.size} TikTok video(s) in Camera, ${ready.size} saved, ${saving.size} still saving")
         found.forEach { video ->
             log.append("\n  ").append(video.describe(nowMs))
-            if (scanner.inTikTokDownloads(video.displayName)) log.append(" | ALSO IN TIKTOK DOWNLOADS")
+            // TikTok only looks for its earlier copy in Camera, so after a move it saves a new one there.
+            if (scanner.inTikTokDownloads(video.displayName)) log.append(" | saved again, already in TikTok Downloads")
         }
 
         if (saving.isNotEmpty()) {
-            val waitMs = saving.maxOf { SettlePolicy.msUntilSettled(it.lastModifiedMs, nowMs) } + RECHECK_MARGIN_MS
+            val waitMs = saving.maxOf { it.msUntilSettled(nowMs) } + RECHECK_MARGIN_MS
             CleanupScheduler.recheckLater(context, waitMs, fromRecheck = recheck)
             log.append("\n  Checking again in ${waitMs / 1000}s")
         }
@@ -61,21 +62,16 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
         if (ready.isNotEmpty()) {
             val uris = ready.map { it.uri }
             val mover = MediaMover(context)
-            val request = mover.writeRequest(uris)
-            val sent = request != null && mover.sendSilently(request)
-            val moved = if (sent) mover.moveOutOfCamera(uris) else 0
-            val silent = when {
-                request == null -> "not available on this Android version"
-                !mover.canManageMedia() -> "skipped, media management is off"
-                !sent -> "failed to send"
-                moved == 0 -> "blocked by Android"
-                else -> "done"
+            if (mover.hasAllFilesAccess()) {
+                val moved = mover.moveOutOfCamera(uris)
+                log.append("\n  Moved $moved directly (All files access)")
+            } else {
+                log.append("\n  Needs a tap: All files access is off")
             }
             val left = scanner.stillInCamera(uris)
-            log.append("\n  Silent move $silent: moved $moved, $left left in Camera")
             if (left > 0) {
                 Notifications.showMovePrompt(context, left)
-                log.append(" -> notification")
+                log.append("\n  $left left in Camera -> notification")
             }
         }
         ActivityLog.add(context, log.toString())

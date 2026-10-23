@@ -14,6 +14,21 @@
     <uses-permission
         android:name="android.permission.MANAGE_MEDIA"
         tools:ignore="ProtectedPermissions" />
+    <!-- Media management only skips the confirmation dialog for apps that also hold this -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!-- Optional "All files access": the only way a background job can move or trash another app's
+         videos without a tap. Fine for a sideloaded APK; Google Play does not allow it for this use. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
+    <!-- Android 11+ hides which app saved a video unless that app is visible to us -->
+    <queries>
+        <package android:name="com.zhiliaoapp.musically" />
+        <package android:name="com.ss.android.ugc.trill" />
+        <package android:name="com.zhiliaoapp.musically.go" />
+        <package android:name="com.ss.android.ugc.tiktok.lite" />
+    </queries>
 
     <application
         android:allowBackup="false"

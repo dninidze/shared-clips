@@ -26,14 +26,11 @@ class CleanupActivity : ComponentActivity() {
     ) { result ->
         lifecycleScope.launch {
             if (result.resultCode == Activity.RESULT_OK) {
-                val moved = mover.moveOutOfCamera(pending)
-                val left = scanner.stillInCamera(pending)
-                ActivityLog.add(this@CleanupActivity, "  Notification move: moved $moved, $left left in Camera")
-                toast("Moved $moved videos to TikTok Downloads")
+                movePending()
             } else {
                 ActivityLog.add(this@CleanupActivity, "  Notification move: permission dialog declined")
+                finish()
             }
-            finish()
         }
     }
 
@@ -43,6 +40,14 @@ class CleanupActivity : ComponentActivity() {
         val approved = result.resultCode == Activity.RESULT_OK
         ActivityLog.add(this, "  Notification delete: ${if (approved) "trashed ${pending.size}" else "declined"}")
         if (approved) toast("Moved ${pending.size} videos to the trash")
+        finish()
+    }
+
+    private suspend fun movePending() {
+        val moved = mover.moveOutOfCamera(pending)
+        val left = scanner.stillInCamera(pending)
+        ActivityLog.add(this, "  Notification move: moved $moved, $left left in Camera")
+        toast("Moved $moved videos to TikTok Downloads")
         finish()
     }
 
@@ -62,7 +67,11 @@ class CleanupActivity : ComponentActivity() {
                             saving.joinToString("") { "\n  waiting: ${it.describe()}" },
                     )
                     if (saving.isNotEmpty()) toast("${saving.size} video(s) still saving, they'll move when done")
-                    launch(mover.writeRequest(pending), moveLauncher)
+                    if (pending.isNotEmpty() && mover.hasAllFilesAccess()) {
+                        movePending()
+                    } else {
+                        launch(mover.writeRequest(pending), moveLauncher)
+                    }
                 }
                 ACTION_DELETE_EXPIRED -> {
                     val days = CleanupSettings(this@CleanupActivity).deleteAfterDays
@@ -71,7 +80,14 @@ class CleanupActivity : ComponentActivity() {
                     } else {
                         emptyList()
                     }
-                    launch(mover.trashRequest(pending), trashLauncher)
+                    if (pending.isNotEmpty() && mover.hasAllFilesAccess()) {
+                        val trashed = mover.trashDirectly(pending)
+                        ActivityLog.add(this@CleanupActivity, "  Notification delete: trashed $trashed")
+                        toast("Moved $trashed videos to the trash")
+                        finish()
+                    } else {
+                        launch(mover.trashRequest(pending), trashLauncher)
+                    }
                 }
                 else -> finish()
             }

@@ -23,6 +23,10 @@ import kotlin.concurrent.thread
  * - mediastore_slow: MediaStore insert, one output stream written in chunks with pauses
  * - mediastore_pending: like mediastore_slow, but hidden with IS_PENDING until finished
  * - file_chunked: raw file path, reopened in append mode for every chunk (a multi-session save)
+ * - tiktok_replica: what TikTok's own save does (traced from the real app): look for DCIM/Camera/<name>
+ *   and reuse it if found; otherwise insert a row with only name, date taken, mime type and
+ *   relative path (no IS_PENDING) and copy the bytes in. Run twice with the same name, it shows what
+ *   happens when a video was moved away and TikTok saves it again (for example when sharing).
  * - cleanup: deletes every file this app saved whose name starts with "sc_test_"
  */
 class SaveActivity : Activity() {
@@ -42,6 +46,7 @@ class SaveActivity : Activity() {
                     "mediastore_slow" -> saveViaMediaStore(name, chunks, gapMs, pending = false)
                     "mediastore_pending" -> saveViaMediaStore(name, chunks, gapMs, pending = true)
                     "file_chunked" -> saveViaFilePath(name, chunks, gapMs)
+                    "tiktok_replica" -> saveLikeTikTok(name, chunks, gapMs)
                     "cleanup" -> cleanUp()
                     else -> error("Unknown mode $mode")
                 }
@@ -101,6 +106,38 @@ class SaveActivity : Activity() {
             if (i < parts.lastIndex) Thread.sleep(gapMs)
         }
         MediaScannerConnection.scanFile(this, arrayOf(file.path), arrayOf("video/mp4"), null)
+        return data.size.toLong()
+    }
+
+    private fun saveLikeTikTok(name: String, chunks: Int, gapMs: Long): Long {
+        val data = sample()
+        contentResolver.query(
+            collection(),
+            arrayOf(MediaStore.Video.Media._ID),
+            "(relative_path=? OR relative_path=?) AND _display_name=?",
+            arrayOf("DCIM/Camera/", "DCIM/Camera", name),
+            null,
+        )?.use { c ->
+            if (c.moveToFirst()) {
+                Log.i(TAG, "REUSED $name")
+                return data.size.toLong()
+            }
+        }
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "DCIM/Camera/")
+        }
+        val uri = contentResolver.insert(collection(), values) ?: error("insert failed")
+        contentResolver.openOutputStream(uri, "w")!!.use { out ->
+            val parts = split(data, chunks)
+            parts.forEachIndexed { i, part ->
+                out.write(part)
+                out.flush()
+                if (i < parts.lastIndex) Thread.sleep(gapMs)
+            }
+        }
         return data.size.toLong()
     }
 

@@ -1,23 +1,27 @@
 package app.sharedclips.action
 
-import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
- * Moves and trashes videos owned by other apps. On Android 11+ each batch needs one system
- * consent dialog, which is skipped when the user has granted "Media management" (Android 12+).
+ * Moves and trashes videos owned by other apps.
+ *
+ * Normally each batch needs a MediaStore request launched from a visible activity (the notification
+ * tap or the home screen). The system shows no dialog for it when the user has granted "Media
+ * management" (Android 12+) and the app holds the read and media-location permissions. A background
+ * job cannot use these requests at all: MediaProvider only grants them to an activity that started
+ * them for a result. With "All files access" the app can move and trash directly, from anywhere.
  */
 class MediaMover(private val context: Context) {
 
-    /** Dialog asking the user to let us modify [uris]; launch it, then call [moveOutOfCamera]. */
+    /** Request to let us modify [uris]; launch it for a result, then call [moveOutOfCamera]. */
     fun writeRequest(uris: List<Uri>): PendingIntent? =
         if (uris.isEmpty()) {
             null // MediaStore throws on an empty request
@@ -27,7 +31,7 @@ class MediaMover(private val context: Context) {
             null // Android 10: a RecoverableSecurityException per file is surfaced by moveOutOfCamera
         }
 
-    /** Dialog moving [uris] to the system trash (recoverable for 30 days). Android 11+. */
+    /** Request moving [uris] to the system trash (recoverable for 30 days). Android 11+. */
     fun trashRequest(uris: List<Uri>): PendingIntent? =
         if (uris.isEmpty()) {
             null
@@ -37,37 +41,17 @@ class MediaMover(private val context: Context) {
             null
         }
 
-    /** True if the user granted "Media management", so requests above complete without a dialog. */
+    /** True if the user granted "Media management", so the requests above show no dialog. */
     fun canManageMedia(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && MediaStore.canManageMedia(context)
 
-    /**
-     * Sends a write or trash request from the background. With "Media management" the system
-     * grants it without showing anything, but Android may still block the launch from the
-     * background, so callers must check the outcome and fall back to a notification.
-     */
-    suspend fun sendSilently(request: PendingIntent): Boolean {
-        if (!canManageMedia()) return false
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val options = ActivityOptions.makeBasic()
-                    .setPendingIntentBackgroundActivityStartMode(
-                        ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                    )
-                request.send(context, 0, null, null, null, null, options.toBundle())
-            } else {
-                request.send()
-            }
-            delay(GRANT_WAIT_MS)
-            true
-        } catch (e: PendingIntent.CanceledException) {
-            false
-        }
-    }
+    /** True if the user granted "All files access": moves and deletes need no request at all. */
+    fun hasAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
 
     /**
-     * Rewrites RELATIVE_PATH so files leave DCIM/Camera. Call after the write request is granted.
-     * Returns how many files moved; files we have no grant for are skipped.
+     * Rewrites RELATIVE_PATH so files leave DCIM/Camera. Needs a granted write request or All files
+     * access. Returns how many files moved; files we may not modify are skipped.
      */
     suspend fun moveOutOfCamera(uris: List<Uri>, targetPath: String = TARGET_RELATIVE_PATH): Int =
         withContext(Dispatchers.IO) {
@@ -81,10 +65,21 @@ class MediaMover(private val context: Context) {
             }
         }
 
+    /** Moves [uris] to the system trash without a request. Needs All files access (Android 11+). */
+    suspend fun trashDirectly(uris: List<Uri>): Int = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@withContext 0
+        val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }
+        uris.sumOf { uri ->
+            try {
+                context.contentResolver.update(uri, values, null, null)
+            } catch (e: SecurityException) {
+                0
+            }
+        }
+    }
+
     companion object {
         /** Outside DCIM/Camera, so Google Photos does not back it up unless the user turns this folder on. */
         const val TARGET_RELATIVE_PATH = "Movies/TikTok Downloads/"
-
-        private const val GRANT_WAIT_MS = 1_500L
     }
 }

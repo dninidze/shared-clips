@@ -20,9 +20,9 @@ class ExpiryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val uris = scanner.findExpired(cutoffSec(days)).map { it.uri }
         if (uris.isEmpty()) return Result.success()
 
+        // Without All files access a background job cannot trash other apps' files; the notification asks.
         val mover = MediaMover(applicationContext)
-        val request = mover.trashRequest(uris)
-        if (request != null) mover.sendSilently(request)
+        if (mover.hasAllFilesAccess()) mover.trashDirectly(uris)
         val left = scanner.countExisting(uris)
         if (left > 0) Notifications.showDeletePrompt(applicationContext, left, days)
         ActivityLog.add(

@@ -26,15 +26,22 @@ data class ScannedVideo(
     val ownerPackage: String? = null,
     /** Last write to the file on disk, in epoch ms; 0 if unknown. */
     val lastModifiedMs: Long = 0,
+    /** Size of the file on disk right now; -1 if it could not be read (then MediaStore's size is used). */
+    val liveBytes: Long = -1,
 ) {
-    /** False while the saving app may still be writing; moving it then can leave a copy behind. */
-    fun isSettled(nowMs: Long = System.currentTimeMillis()) = SettlePolicy.isSettled(lastModifiedMs, nowMs)
+    private val bytes get() = if (liveBytes >= 0) liveBytes else sizeBytes
+
+    /** False while the saving app may still be writing; such a video is left alone for now. */
+    fun isSettled(nowMs: Long = System.currentTimeMillis()) = SettlePolicy.isSettled(lastModifiedMs, bytes, nowMs)
+
+    fun msUntilSettled(nowMs: Long = System.currentTimeMillis()) =
+        SettlePolicy.msUntilSettled(lastModifiedMs, bytes, nowMs)
 
     /** One line for the activity log. */
     fun describe(nowMs: Long = System.currentTimeMillis()): String {
         val ageSec = if (lastModifiedMs > 0) "${(nowMs - lastModifiedMs) / 1000}s ago" else "unknown"
         val state = if (isSettled(nowMs)) "saved" else "still saving"
-        return "$displayName | owner=${ownerPackage ?: "none"} | ${sizeBytes / 1024} KB | " +
+        return "$displayName | owner=${ownerPackage ?: "none"} | ${bytes / 1024} KB | " +
             "last written $ageSec | $state | ${detection.verdict}"
     }
 }
@@ -53,7 +60,13 @@ class MediaStoreScanner(private val context: Context) {
             .let { videos ->
                 // The later of the live file time and MediaStore's time, to err on "still saving".
                 withContext(Dispatchers.IO) {
-                    videos.map { it.copy(lastModifiedMs = maxOf(it.lastModifiedMs, lastModifiedMs(it.uri))) }
+                    videos.map { video ->
+                        val stat = liveStat(video.uri)
+                        video.copy(
+                            lastModifiedMs = maxOf(video.lastModifiedMs, stat?.lastModifiedMs ?: 0),
+                            liveBytes = stat?.bytes ?: -1,
+                        )
+                    }
                 }
             }
 
@@ -165,17 +178,20 @@ class MediaStoreScanner(private val context: Context) {
         results
     }
 
+    private class LiveStat(val lastModifiedMs: Long, val bytes: Long)
+
     /**
-     * Last write time of the file itself. MediaStore's DATE_MODIFIED is only refreshed when a writer
-     * closes the file, so it can look old while a download is still being written; fstat is live.
+     * Last write time and size of the file itself. MediaStore's DATE_MODIFIED and SIZE are only
+     * refreshed when a writer closes the file, so they can look final while it is still being
+     * written; fstat is live.
      */
-    private fun lastModifiedMs(uri: Uri): Long = try {
+    private fun liveStat(uri: Uri): LiveStat? = try {
         context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-            val mtime = Os.fstat(pfd.fileDescriptor).st_mtim
-            mtime.tv_sec * 1000 + mtime.tv_nsec / 1_000_000
-        } ?: 0L
+            val stat = Os.fstat(pfd.fileDescriptor)
+            LiveStat(stat.st_mtim.tv_sec * 1000 + stat.st_mtim.tv_nsec / 1_000_000, stat.st_size)
+        }
     } catch (e: Exception) {
-        0L
+        null
     }
 
     private fun readCaptureMetadata(uri: Uri): Boolean? = try {

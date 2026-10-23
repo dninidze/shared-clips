@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshLog()
         // Pick up moves made in the background while the app was closed.
         if (ContextCompat.checkSelfPermission(this, readPermission()) == PackageManager.PERMISSION_GRANTED) {
-            viewModel.scan()
+            viewModel.scan(clearMessage = false)
         }
     }
 
@@ -57,9 +57,14 @@ class MainActivity : ComponentActivity() {
             SharedClipsTheme {
                 val state = viewModel.state.collectAsStateWithLifecycle().value
 
+                // Media location access is asked together with read access: without it, "Media
+                // management" still shows a confirmation dialog for every move.
                 val permissionLauncher = rememberLauncherForActivityResult(
-                    ActivityResultContracts.RequestPermission()
-                ) { granted -> if (granted) viewModel.scan() }
+                    ActivityResultContracts.RequestMultiplePermissions()
+                ) { results -> if (results[readPermission] == true) viewModel.scan() }
+                val requestRead = {
+                    permissionLauncher.launch(arrayOf(readPermission, Manifest.permission.ACCESS_MEDIA_LOCATION))
+                }
 
                 val moveLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.StartIntentSenderForResult()
@@ -73,11 +78,11 @@ class MainActivity : ComponentActivity() {
                     ActivityResultContracts.RequestPermission()
                 ) { }
 
-                LaunchedEffect(Unit) { permissionLauncher.launch(readPermission) }
+                LaunchedEffect(Unit) { requestRead() }
 
                 HomeScreen(
                     state = state,
-                    onScan = { permissionLauncher.launch(readPermission) },
+                    onScan = requestRead,
                     onModeChange = viewModel::setMode,
                     onAutoMoveChange = { enabled ->
                         viewModel.setAutoMove(enabled)
@@ -100,14 +105,21 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     },
+                    onRequestAllFilesAccess = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                    Uri.parse("package:$packageName"),
+                                )
+                            )
+                        }
+                    },
                     onCleanUp = {
-                        when (state.mode) {
-                            CleanupMode.MOVE_TO_FOLDER -> viewModel.moveRequest()?.let {
-                                moveLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
-                            }
-                            CleanupMode.DELETE -> viewModel.trashRequest()?.let {
-                                trashLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
-                            }
+                        viewModel.cleanUp { request ->
+                            val delete = viewModel.state.value.mode == CleanupMode.DELETE
+                            val launcher = if (delete) trashLauncher else moveLauncher
+                            launcher.launch(IntentSenderRequest.Builder(request.intentSender).build())
                         }
                     },
                 )
