@@ -51,7 +51,7 @@ class CleanupActivity : ComponentActivity() {
     ) { result ->
         requestInFlight = false
         val approved = result.resultCode == Activity.RESULT_OK
-        ActivityLog.add(this, "  Notification delete: ${if (approved) "trashed ${pending.size}" else "declined"}")
+        ActivityLog.add(this, "Notification delete: ${if (approved) "trashed ${pending.size}" else "declined"}")
         if (approved) {
             toast("Moved ${pending.size} videos to the trash")
             Notifications.cancelDeletePrompt(this)
@@ -101,12 +101,18 @@ class CleanupActivity : ComponentActivity() {
             "Notification tapped: ${ready.size} saved, ${saving.size} still saving" +
                 saving.joinToString("") { "\n  waiting: ${it.describe(nowMs)}" },
         )
+        val autoMove = CleanupSettings(this).autoMove
+        // Announced again, so the prompt that comes back for them once they are saved alerts too.
+        if (saving.isNotEmpty() && autoMove) Notifications.announceAgain(this, saving.map { it.id })
         when {
             saving.isNotEmpty() -> toast(
                 "${saving.size} video(s) still saving. " +
-                    if (CleanupSettings(this).autoMove) "You'll get another notification when they're done." else "Use Move all in the app later."
+                    if (autoMove) "You'll get another notification when they're done." else "Use Move all in the app later."
             )
-            ready.isEmpty() -> toast("Nothing left to move")
+            ready.isEmpty() -> {
+                toast("Nothing left to move")
+                Notifications.withdrawMovePromptIfDone(this)
+            }
         }
         when {
             pending.isEmpty() -> finish()
@@ -130,7 +136,7 @@ class CleanupActivity : ComponentActivity() {
             }
             mover.hasAllFilesAccess() -> {
                 val trashed = mover.trashDirectly(pending)
-                ActivityLog.add(this, "  Notification delete: trashed $trashed")
+                ActivityLog.add(this, "Notification delete: trashed $trashed")
                 toast("Moved $trashed videos to the trash")
                 Notifications.cancelDeletePrompt(this)
                 finish()
@@ -144,7 +150,7 @@ class CleanupActivity : ComponentActivity() {
         val left = scanner.stillInCamera(pending)
         ActivityLog.add(this, "  Notification move: moved $moved, $left left in Camera")
         toast("Moved $moved videos to TikTok Downloads")
-        if (left == 0) Notifications.cancelMovePrompt(this)
+        Notifications.withdrawMovePromptIfDone(this)
         finish()
     }
 

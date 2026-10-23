@@ -247,6 +247,18 @@ object Device {
         }
     }
 
+    /**
+     * Swipes the notification away: removes it and sends its delete intent, as the notification
+     * shade does. (Removing it alone is what Android does on a restart or an app update.)
+     */
+    fun dismissNotification(context: Context, id: Int) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val posted = manager.activeNotifications.firstOrNull { it.id == id } ?: error("Notification $id is not shown")
+        manager.cancel(id)
+        val dismissed = posted.notification.deleteIntent ?: error("Notification $id has no delete intent")
+        dismissed.send()
+    }
+
     /** Runs [change] and waits until the automatic mode watcher has finished looking at it. */
     fun awaitWatcherRun(context: Context, change: () -> Unit) {
         val workManager = WorkManager.getInstance(context)

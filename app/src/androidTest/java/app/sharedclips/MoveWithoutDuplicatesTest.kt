@@ -144,7 +144,7 @@ class MoveWithoutDuplicatesTest {
         }
 
         // The user swipes it away and keeps the video in Camera.
-        Device.cancelNotifications(context)
+        Device.dismissNotification(context, Notifications.ID_MOVE)
         video.monitor.watch(10_000)
 
         // Another app saves a video somewhere else: automatic mode looks again, but must not ring
@@ -159,6 +159,32 @@ class MoveWithoutDuplicatesTest {
         assertTrue("The video left Camera without a tap", video.monitor.sample().single().inCamera)
     }
 
+    @Test
+    fun autoMode_notificationRemovedByAndroid_comesBack() {
+        val video = TestVideo(context, "removed")
+        setAutoMove(context, true)
+        FakeTikTok.startSave(video.name, mode = "mediastore")
+        video.awaitSaved()
+        waitFor("the move notification", 90_000) {
+            true.takeIf { Device.hasNotification(context, Notifications.ID_MOVE) }
+        }
+
+        // Android removes it, as on a restart or an app update; the user never saw it go.
+        Device.cancelNotifications(context)
+
+        // The next look (at the latest, after the next video change) shows it again.
+        val other = TestVideo(context, "unrelated")
+        Device.awaitWatcherRun(context) {
+            FakeTikTok.startSave(other.name, mode = "mediastore", relativePath = "Movies/Other")
+            other.awaitSaved()
+        }
+        waitFor("the move notification to come back", 30_000) {
+            true.takeIf { Device.hasNotification(context, Notifications.ID_MOVE) }
+        }
+        Device.tapNotification(context, Notifications.ID_MOVE)
+        video.awaitMoved()
+    }
+
     /** Taps the move notification as soon as it is shown, the way a user would. */
     private fun tapIfNotified() {
         if (Device.hasNotification(context, Notifications.ID_MOVE)) Device.tapNotification(context, Notifications.ID_MOVE)
@@ -166,7 +192,7 @@ class MoveWithoutDuplicatesTest {
 
     /**
      * Automatic mode while fake TikTok saves in 8 parts over ~21 s. Without All files access the app
-     * posts a notification; the test taps it as soon as it appears, even mid-save, like a user would.
+     * posts a notification once the video is saved; the test taps it as soon as it appears.
      */
     private fun autoMoveScenario(video: TestVideo, mode: String, startDelayMs: Long = 0) {
         setAutoMove(context, true)

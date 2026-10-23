@@ -52,13 +52,15 @@ class AutoDeleteTest {
         assertTrue("Trashed without a tap", video.monitor.sample().single().inTikTokDownloads)
 
         Device.tapNotification(context, Notifications.ID_DELETE)
-        waitFor("the video to be moved to the trash", 30_000) {
-            true.takeIf { Copies.inTrash(context, video.prefix) == 1 }
+        // The activity logs the result after the trash request returns, so wait for both.
+        waitFor("the video to be moved to the trash and the result logged", 30_000) {
+            true.takeIf {
+                Copies.inTrash(context, video.prefix) == 1 &&
+                    ActivityLog.read(context).any { it.contains("Notification delete: trashed 1") }
+            }
         }
-        val log = ActivityLog.read(context).joinToString("\n")
         assertTrue("Still on disk:\n${video.monitor.report()}", video.monitor.sample().isEmpty())
         assertTrue("Still in the gallery", Copies.inMediaStore(context, video.prefix).isEmpty())
-        assertTrue("Not logged:\n$log", log.contains("Notification delete: trashed"))
     }
 
     @Test

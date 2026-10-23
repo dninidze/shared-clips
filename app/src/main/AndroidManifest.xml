@@ -63,5 +63,9 @@
             android:exported="false"
             android:taskAffinity=""
             android:theme="@style/Theme.SharedClips.Translucent" />
+        <!-- Told when the user swipes away the move notification -->
+        <receiver
+            android:name=".work.MovePromptDismissed"
+            android:exported="false" />
     </application>
 </manifest>

@@ -224,11 +224,13 @@ private fun AccessHints(
             )
             OutlinedButton(onClick = onRequestAllFilesAccess) { Text("Allow all files access") }
             if (!state.notificationsOn) {
-                Hint(
-                    "Notifications are off for this app, so those taps never reach you and videos stay " +
-                        "in Camera until you open the app.",
-                    warning = true,
-                )
+                val missed = when {
+                    state.autoMove && autoDelete ->
+                        "new videos stay in Camera until you open the app, and old ones are not deleted"
+                    state.autoMove -> "new videos stay in Camera until you open the app"
+                    else -> "old videos in TikTok Downloads are not deleted"
+                }
+                Hint("Notifications are off for this app, so $missed.", warning = true)
                 OutlinedButton(onClick = onRequestNotifications) { Text("Turn on notifications") }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !state.canManageMedia) {

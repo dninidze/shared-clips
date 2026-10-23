@@ -105,6 +105,21 @@ class MediaStoreScanner(private val context: Context) {
         }
     }
 
+    /** Of [ids], the videos still in the camera folder and not in the trash. */
+    suspend fun idsInCamera(ids: List<Long>): List<Long> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyList()
+        val found = mutableListOf<Long>()
+        context.contentResolver.query(
+            collection,
+            arrayOf(MediaStore.Video.Media._ID),
+            "${MediaStore.Video.Media._ID} IN (${ids.joinToString(",")}) AND " +
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?",
+            arrayOf("$CAMERA_RELATIVE_PATH%"),
+            null,
+        )?.use { c -> while (c.moveToNext()) found += c.getLong(0) }
+        found
+    }
+
     /**
      * Of [ids], the videos still in TikTok Downloads and not in the trash. Queries the collection:
      * a query on a single item's URI also returns it while it is in the trash.

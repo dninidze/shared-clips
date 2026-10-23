@@ -13,7 +13,6 @@ import app.sharedclips.data.CleanupMode
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.MediaStoreScanner
 import app.sharedclips.data.ScannedVideo
-import app.sharedclips.detect.Verdict
 import app.sharedclips.work.CleanupScheduler
 import app.sharedclips.work.Notifications
 import kotlinx.coroutines.Job
@@ -89,6 +88,8 @@ class HomeViewModel(app: Application, private val saved: SavedStateHandle) : And
     }
 
     fun setDeleteAfterDays(days: Int) {
+        // An open delete prompt was worked out with the old limit.
+        if (days != settings.deleteAfterDays) Notifications.cancelDeletePrompt(getApplication())
         settings.deleteAfterDays = days
         _state.update { it.copy(deleteAfterDays = days) }
         CleanupScheduler.apply(getApplication())
@@ -212,8 +213,8 @@ class HomeViewModel(app: Application, private val saved: SavedStateHandle) : And
 
     private fun showScan(found: List<ScannedVideo>) {
         _state.update { it.copy(scanning = false, videos = found) }
-        // A move prompt only ever announces confirmed TikTok videos in Camera; with none left it is stale.
-        if (found.none { it.detection.verdict == Verdict.TIKTOK }) Notifications.cancelMovePrompt(getApplication())
+        // A move prompt whose videos have all left Camera (moved here, in a gallery app, or deleted) is stale.
+        viewModelScope.launch { Notifications.withdrawMovePromptIfDone(getApplication()) }
         // Rescan when the first video still being saved should be done, so its label updates by itself.
         settleJob?.cancel()
         val now = System.currentTimeMillis()

@@ -108,16 +108,17 @@ class AutoMoveWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if (left.isNotEmpty()) {
                 val result = Notifications.showMovePrompt(context, left.map { ContentUris.parseId(it) })
                 log.append("\n  ${left.size} left in Camera ${result.log}")
-                acted = acted || result == Notifications.Result.POSTED
+                acted = acted || result == Notifications.Result.POSTED || result == Notifications.Result.POSTED_SILENTLY
             } else {
-                Notifications.cancelMovePrompt(context)
+                Notifications.withdrawMovePromptIfDone(context)
             }
         } else if (saving.isEmpty()) {
-            // Nothing recent left to announce: an open prompt is out of date.
-            Notifications.cancelMovePrompt(context)
+            // Nothing recent left to announce: an open prompt is out of date once its videos are gone.
+            Notifications.withdrawMovePromptIfDone(context)
         }
 
-        val signature = if (seen.isEmpty()) "" else "${if (recheck) "R" else "V"} $seen"
+        // The run kind is left out, so a catch-up re-check that sees what the run before it saw is not logged again.
+        val signature = seen.toString()
         Log.i(TAG, "Auto-move run: ${if (recheck) "re-check" else "video change"}, saw ${seen.ifEmpty { "nothing" }}")
         val isNew = LastLog(context).changed(signature)
         if ((isNew && seen.isNotEmpty()) || acted) ActivityLog.add(context, log.toString())
