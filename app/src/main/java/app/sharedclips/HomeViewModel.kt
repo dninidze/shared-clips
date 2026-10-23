@@ -1,0 +1,55 @@
+package app.sharedclips
+
+import android.app.Application
+import android.app.PendingIntent
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import app.sharedclips.action.MediaMover
+import app.sharedclips.data.MediaStoreScanner
+import app.sharedclips.data.ScannedVideo
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+data class HomeState(
+    val scanning: Boolean = false,
+    val videos: List<ScannedVideo> = emptyList(),
+    val message: String? = null,
+) {
+    val totalBytes: Long get() = videos.sumOf { it.sizeBytes }
+}
+
+class HomeViewModel(app: Application) : AndroidViewModel(app) {
+    private val scanner = MediaStoreScanner(app)
+    private val mover = MediaMover(app)
+
+    private val _state = MutableStateFlow(HomeState())
+    val state: StateFlow<HomeState> = _state
+
+    fun scan() {
+        _state.update { it.copy(scanning = true, message = null) }
+        viewModelScope.launch {
+            val found = scanner.scanCameraFolder()
+            _state.update { it.copy(scanning = false, videos = found) }
+        }
+    }
+
+    fun moveRequest(): PendingIntent? = mover.writeRequest(_state.value.videos.map { it.uri })
+
+    fun trashRequest(): PendingIntent? = mover.trashRequest(_state.value.videos.map { it.uri })
+
+    /** Called after the user approved the write request. */
+    fun onMoveApproved() {
+        viewModelScope.launch {
+            val moved = mover.moveOutOfCamera(_state.value.videos.map { it.uri })
+            _state.update { it.copy(message = "Moved $moved videos out of Camera") }
+            scan()
+        }
+    }
+
+    fun onTrashApproved() {
+        _state.update { it.copy(message = "Moved ${it.videos.size} videos to trash") }
+        scan()
+    }
+}
