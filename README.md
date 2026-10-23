@@ -7,8 +7,8 @@ Plan: see the "TikTok Video Cleanup: Product & Technical Plan" doc in the projec
 ## Status (MVP, manual mode)
 
 - Scans `DCIM/Camera` videos via MediaStore and scores each one (`detect/TikTokDetector.kt`).
-- One tap moves matches to `Movies/Shared Clips/` (one system consent dialog per batch on Android 11+).
-- One tap sends matches to the system trash (recoverable for 30 days).
+- The user picks what cleanup does: move matches to `Movies/TikTok Downloads/` (default) or delete them to the system trash (recoverable for 30 days). The choice is remembered.
+- One tap applies it to all matches (one system consent dialog per batch on Android 11+).
 
 Not built yet: background watcher, auto-expiry after N days, "Not sure" review, settings.
 
