@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "SharedClips"
 include(":app")
+include(":faketiktok")

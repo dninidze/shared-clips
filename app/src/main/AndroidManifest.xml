@@ -4,16 +4,46 @@
 
     <!-- Android 13+: read videos only -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <!-- Android 10-12 -->
+    <!-- Android 11-12 -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Android 13+: one-tap prompts when a background move or delete needs the user -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Android 12+: lets the user grant "Media management" so moves and trash run without a dialog -->
     <uses-permission
         android:name="android.permission.MANAGE_MEDIA"
         tools:ignore="ProtectedPermissions" />
+    <!-- Media management only skips the confirmation dialog for apps that also hold this -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!-- Lets the user exempt the app from battery optimization, so Android does not hold back the
+         automatic jobs of an app that is rarely opened. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Optional "All files access": the only way a background job can move or trash another app's
+         videos without a tap. Fine for a sideloaded APK; Google Play does not allow it for this use. -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
+    <!-- Android 14+ hides which app saved a video (OWNER_PACKAGE_NAME) from apps targeting 34+,
+         unless that app is visible to us. Keep in sync with TikTokDetector's package lists. -->
+    <queries>
+        <package android:name="com.zhiliaoapp.musically" />
+        <package android:name="com.ss.android.ugc.trill" />
+        <package android:name="com.zhiliaoapp.musically.go" />
+        <package android:name="com.ss.android.ugc.tiktok.lite" />
+        <package android:name="com.google.android.GoogleCamera" />
+        <package android:name="com.sec.android.app.camera" />
+        <package android:name="com.android.camera" />
+        <package android:name="com.android.camera2" />
+        <package android:name="com.oneplus.camera" />
+        <package android:name="com.oplus.camera" />
+        <package android:name="com.motorola.camera3" />
+        <package android:name="com.huawei.camera" />
+    </queries>
 
     <application
+        android:name=".SharedClipsApp"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -26,5 +56,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".CleanupActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection|keyboard|keyboardHidden|navigation"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.SharedClips.Translucent" />
+        <!-- Told when the user swipes away the move notification -->
+        <receiver
+            android:name=".work.MovePromptDismissed"
+            android:exported="false" />
     </application>
 </manifest>
