@@ -62,11 +62,18 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # Each line runs on its own. Test failures are recorded, diagnostics printed to the job log
+          # (readable without downloading artifacts), and the step fails at the end.
           script: |
             adb install -r faketiktok/build/outputs/apk/debug/faketiktok-debug.apk
             adb logcat -c || true
-            gradle :app:connectedDebugAndroidTest --stacktrace || (adb logcat -d > logcat.txt; exit 1)
-            adb logcat -d > logcat.txt
+            gradle :app:connectedDebugAndroidTest --stacktrace || touch tests-failed
+            adb logcat -d > logcat.txt || true
+            adb shell dumpsys jobscheduler > jobscheduler.txt || true
+            echo "::group::Failed tests"; python3 .github/scripts/print_failures.py app/build/outputs/androidTest-results/connected; echo "::endgroup::"
+            echo "::group::App and test logcat"; grep -E "SharedClips|FakeTikTok|WM-|BackgroundActivity|Background activity|Abort background|ActivityTaskManager: START|MediaProvider.*(sc_test_|rename|Permission)|AndroidRuntime" logcat.txt | tail -n 600 || true; echo "::endgroup::"
+            echo "::group::Scheduled jobs"; grep -B2 -A12 "app.sharedclips" jobscheduler.txt | head -n 200 || true; echo "::endgroup::"
+            test ! -f tests-failed
       - name: Upload test reports and logcat
         if: always()
         uses: actions/upload-artifact@v4
@@ -76,3 +83,4 @@ jobs:
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
             logcat.txt
+            jobscheduler.txt
