@@ -39,6 +39,6 @@ If this policy changes, the new version will be posted at this address with a ne
 
 ## Contact
 
-Questions: calmcraftgames@gmail.com
+Questions: hello@sealdraw.com
 
 ClipSweep is an independent app and is not affiliated with TikTok or Google.
