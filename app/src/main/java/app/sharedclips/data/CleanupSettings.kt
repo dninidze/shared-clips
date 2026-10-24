@@ -24,11 +24,17 @@ class CleanupSettings(context: Context) {
         get() = prefs.getInt(KEY_DELETE_AFTER_DAYS, 0)
         set(value) = prefs.edit().putInt(KEY_DELETE_AFTER_DAYS, value).apply()
 
+    /** The first-run screens were finished or skipped. */
+    var onboarded: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDED, false)
+        set(value) = prefs.edit().putBoolean(KEY_ONBOARDED, value).apply()
+
     companion object {
         val DELETE_AFTER_OPTIONS = listOf(0, 1, 3, 7, 14, 30)
 
         private const val KEY_MODE = "mode"
         private const val KEY_AUTO_MOVE = "auto_move"
         private const val KEY_DELETE_AFTER_DAYS = "delete_after_days"
+        private const val KEY_ONBOARDED = "onboarded"
     }
 }
