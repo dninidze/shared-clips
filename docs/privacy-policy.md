@@ -39,4 +39,6 @@ If this policy changes, the new version will be posted at this address with a ne
 
 ## Contact
 
-Questions: [contact email]
+Questions: calmcraftgames@gmail.com
+
+ClipSweep is an independent app and is not affiliated with TikTok or Google.
