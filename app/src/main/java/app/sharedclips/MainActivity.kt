@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.sharedclips.data.ActivityLog
 import app.sharedclips.data.AppAccess
 import app.sharedclips.ui.HomeScreen
+import app.sharedclips.ui.OnboardingScreen
 import app.sharedclips.ui.theme.SharedClipsTheme
 
 class MainActivity : ComponentActivity() {
@@ -136,7 +137,10 @@ class MainActivity : ComponentActivity() {
                 // management" still shows a confirmation dialog for every move.
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
-                ) { results -> if (results[readPermission] == true) viewModel.scan() }
+                ) { results ->
+                    viewModel.refreshAccess()
+                    if (results[readPermission] == true) viewModel.scan()
+                }
                 val requestRead = {
                     permissionLauncher.launch(arrayOf(readPermission, Manifest.permission.ACCESS_MEDIA_LOCATION))
                 }
@@ -167,7 +171,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                LaunchedEffect(Unit) { requestRead() }
+                // After onboarding, which asks for it with an explanation first.
+                LaunchedEffect(state.onboarded) { if (state.onboarded) requestRead() }
 
                 // The system request is launched from here, with this composition's launchers, so a
                 // request prepared while the screen was being recreated still goes to a live one.
@@ -179,6 +184,18 @@ class MainActivity : ComponentActivity() {
                     } finally {
                         viewModel.requestLaunched()
                     }
+                }
+
+                if (!state.onboarded) {
+                    OnboardingScreen(
+                        state = state,
+                        onAllowRead = requestRead,
+                        onAllowNotifications = askForNotifications,
+                        onAllowManageMedia = ::openManageMedia,
+                        onAutoMoveChange = viewModel::setAutoMove,
+                        onFinish = viewModel::finishOnboarding,
+                    )
+                    return@SharedClipsTheme
                 }
 
                 HomeScreen(

@@ -52,6 +52,20 @@ import app.sharedclips.data.CleanupMode
 import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.ScannedVideo
 import app.sharedclips.detect.Verdict
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import app.sharedclips.R
+import app.sharedclips.ui.theme.Ink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -72,7 +86,6 @@ fun HomeScreen(
     onShareLog: () -> Unit,
     onClearLog: () -> Unit,
 ) {
-    val context = LocalContext.current
     Scaffold { padding ->
         LazyColumn(
             Modifier
@@ -82,9 +95,23 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("ClipSweep", style = MaterialTheme.typography.headlineMedium)
-                    Spacer(Modifier.width(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_mark),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text("ClipSweep", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
                     Text(
                         "v${state.versionName}",
                         style = MaterialTheme.typography.bodySmall,
@@ -92,6 +119,8 @@ fun HomeScreen(
                     )
                 }
             }
+
+            item { StatusCard(state, onCleanUp) }
 
             item {
                 AutomationSection(
@@ -116,12 +145,7 @@ fun HomeScreen(
                         Spacer(Modifier.width(12.dp))
                         Text("Scanning your Camera folder")
                     }
-                    state.videos.isEmpty() -> Text("No TikTok videos in your Camera folder.")
-                    else -> Text(
-                        "${state.videos.size} TikTok videos in Camera, " +
-                            Formatter.formatShortFileSize(context, state.totalBytes),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                    else -> Text("In your Camera folder", style = MaterialTheme.typography.titleMedium)
                 }
             }
             state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
@@ -129,18 +153,72 @@ fun HomeScreen(
             item { ModePicker(state.mode, onModeChange) }
 
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onCleanUp, enabled = state.videos.isNotEmpty()) {
-                        Text(if (state.mode == CleanupMode.DELETE) "Delete all" else "Move all")
-                    }
-                    OutlinedButton(onClick = onScan) { Text("Scan again") }
-                }
+                OutlinedButton(onClick = onScan) { Text("Scan again") }
             }
 
             items(state.videos, key = { it.id }) { VideoRow(it) }
 
             item { HorizontalDivider() }
-            item { ActivityLogSection(state.log, onShareLog, onClearLog) }
+            item {
+                var showLog by rememberSaveable { mutableStateOf(false) }
+                if (showLog) {
+                    ActivityLogSection(state.log, onShareLog, onClearLog)
+                } else {
+                    TextButton(onClick = { showLog = true }) { Text("Show activity log") }
+                }
+            }
+        }
+    }
+}
+
+/** The headline: what is waiting in Camera right now, and what is already kept out of the backup. */
+@Composable
+private fun StatusCard(state: HomeState, onCleanUp: () -> Unit) {
+    val context = LocalContext.current
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val waiting = state.videos.size
+            Text(
+                when {
+                    !state.canRead -> "Allow access to your videos to start"
+                    waiting == 0 -> "Camera is clear"
+                    waiting == 1 -> "1 TikTok video in Camera"
+                    else -> "$waiting TikTok videos in Camera"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                when {
+                    waiting > 0 -> Formatter.formatShortFileSize(context, state.totalBytes) +
+                        " your photo backup would upload"
+                    state.autoMove -> "Automatic mode is on: new downloads are handled as they arrive."
+                    else -> "No TikTok downloads waiting to be backed up."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (state.keptCount > 0) {
+                Text(
+                    "${state.keptCount} kept out of backup in TikTok Downloads (" +
+                        Formatter.formatShortFileSize(context, state.keptBytes) + ")",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (waiting > 0) {
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onCleanUp,
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White),
+                ) {
+                    Text(if (state.mode == CleanupMode.DELETE) "Delete all" else "Move all")
+                }
+            }
         }
     }
 }

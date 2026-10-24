@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The ClipSweep mark (play triangle with speed bars), for use inside the app. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+    <path
+        android:fillColor="#16151A"
+        android:pathData="M122 84.78A12 12 0 0 1 140 74.39L214.85 117.61A12 12 0 0 1 214.85 138.39L140 181.61A12 12 0 0 1 122 171.22ZM44 78H96A10 10 0 0 1 96 98H44A10 10 0 0 1 44 78ZM64 118H96A10 10 0 0 1 96 138H64A10 10 0 0 1 64 118ZM84 158H96A10 10 0 0 1 96 178H84A10 10 0 0 1 84 158Z" />
+</vector>

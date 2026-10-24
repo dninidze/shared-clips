@@ -39,13 +39,14 @@ jobs:
             export RELEASE_KEYSTORE="$RUNNER_TEMP/upload.jks"
           fi
           gradle :app:bundlePlayRelease --stacktrace
-      - name: Check the Play build leaves out restricted permissions
+      # The privacy policy says the app has no internet access, so the Play build must not gain it.
+      - name: Check the Play build leaves out restricted permissions and internet access
         run: |
           manifest=app/build/intermediates/merged_manifests/playRelease/processPlayReleaseManifest/AndroidManifest.xml
           test -f "$manifest" || manifest=$(find app/build/intermediates -path "*playRelease*" -name AndroidManifest.xml | head -n 1)
           test -f "$manifest"
           echo "Checking $manifest"
-          ! grep -E "MANAGE_EXTERNAL_STORAGE|REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" "$manifest"
+          ! grep -E "MANAGE_EXTERNAL_STORAGE|REQUEST_IGNORE_BATTERY_OPTIMIZATIONS|android.permission.INTERNET" "$manifest"
       - uses: actions/upload-artifact@v4
         with:
           name: clipsweep-full-debug-apk
