@@ -6,14 +6,14 @@ plugins {
 
 android {
     namespace = "app.sharedclips"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.sharedclips"
         minSdk = 30
-        targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.1"
+        targetSdk = 36
+        versionCode = 8
+        versionName = "0.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -27,12 +27,40 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // The Play upload key. Never checked in: CI and local release builds read it from the
+        // environment, and without it release builds come out unsigned.
+        System.getenv("RELEASE_KEYSTORE")?.let { path ->
+            create("release") {
+                storeFile = file(path)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    // "play" is the Google Play build: no All files access and no battery-exemption request, which
+    // Play does not allow for this kind of app, so background moves always go through a one-tap
+    // notification. "full" is the sideloaded build with silent background moves; it keeps the old
+    // application ID so it installs over earlier test builds.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            applicationId = "app.clipsweep"
+            buildConfigField("boolean", "ALL_FILES_ACCESS", "false")
+        }
+        create("full") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ALL_FILES_ACCESS", "true")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {
@@ -44,6 +72,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

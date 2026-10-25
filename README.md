@@ -1,4 +1,6 @@
-# Shared Clips
+# ClipSweep
+
+(Repository and package names still say "shared clips", the app's working name.)
 
 Android app that finds saved TikTok videos in `DCIM/Camera`, moves them out of the folder Google Photos backs up, and deletes them after a few days.
 
@@ -23,17 +25,32 @@ Plan: see the "TikTok Video Cleanup: Product & Technical Plan" doc in the projec
 
 Not built yet: "Not sure" review, other source apps.
 
-## Build
+## Builds
+
+There are two product flavors:
+
+- `play`: the Google Play build (application ID `app.clipsweep`). It leaves out All files access and the
+  battery-exemption request, which Play does not allow for this kind of app, so background moves and
+  deletes always go through a one-tap notification. The battery hint sends the user to App info instead.
+- `full`: the sideloaded build (application ID `app.sharedclips`, so it installs over earlier test builds)
+  with optional All files access for moves without a tap.
+
+CI uploads `clipsweep-full-debug-apk`, `clipsweep-play-debug-apk` and `clipsweep-play-release-bundle`
+(the `.aab` for Play Console). The bundle is signed with the upload key when these repository secrets are
+set, and unsigned otherwise: `RELEASE_KEYSTORE_BASE64` (the keystore file, base64), `RELEASE_KEYSTORE_PASSWORD`,
+`RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`. Locally, set the same variables with `RELEASE_KEYSTORE` as the
+keystore's path. Keep the keystore out of the repository; with Play App Signing a lost upload key can be reset.
+
 
 Open the folder in Android Studio (Ladybug or newer) and run `app`. Min SDK 30 (Android 11; moving another
-app's videos needs MediaStore write requests or All files access, which Android 10 lacks), target SDK 35.
+app's videos needs MediaStore write requests or All files access, which Android 10 lacks), target SDK 36.
 Android Studio generates the Gradle wrapper on first sync; from the command line, run `gradle wrapper` once.
 Debug builds are signed with the checked-in `app/debug.keystore`, so every CI APK installs over the previous one.
 
 ## Tests
 
-- Unit tests (detector, save-finished and failed-save rules): `gradle :app:testDebugUnitTest`.
-- Device tests run on Android emulators (API 31 and 34) in GitHub Actions on every push. They install
+- Unit tests (detector, save-finished and failed-save rules): `gradle :app:testFullDebugUnitTest :app:testPlayDebugUnitTest`.
+- Device tests run against the `full` flavor on Android emulators (API 31 and 34) in GitHub Actions on every push. They install
   `:faketiktok`, a test-only app with TikTok's package name (`com.zhiliaoapp.musically`), which saves a
   sample video into DCIM/Camera in several ways (TikTok's own save sequence, including an empty entry that
   waits before the copy starts, MediaStore, slow stream, IS_PENDING, a raw path reopened per chunk while the
@@ -47,5 +64,5 @@ Debug builds are signed with the checked-in `app/debug.keystore`, so every CI AP
   including auto-delete.
   To run them locally: start an emulator, `adb install faketiktok/build/outputs/apk/debug/faketiktok-debug.apk`
   (after `gradle :faketiktok:assembleDebug`), then
-  `gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=app.sharedclips.AllFilesAccessTest`
-  and `gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=app.sharedclips.AllFilesAccessTest`.
+  `gradle :app:connectedFullDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=app.sharedclips.AllFilesAccessTest`
+  and `gradle :app:connectedFullDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=app.sharedclips.AllFilesAccessTest`.

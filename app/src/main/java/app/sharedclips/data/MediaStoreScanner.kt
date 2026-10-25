@@ -123,6 +123,25 @@ class MediaStoreScanner(private val context: Context) {
         found
     }
 
+    /** How many videos TikTok Downloads holds, and their total size in bytes. */
+    suspend fun downloadsSummary(): Pair<Int, Long> = withContext(Dispatchers.IO) {
+        var count = 0
+        var bytes = 0L
+        context.contentResolver.query(
+            collection,
+            arrayOf(MediaStore.Video.Media.SIZE),
+            "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?",
+            arrayOf("${MediaMover.TARGET_RELATIVE_PATH}%"),
+            null,
+        )?.use { c ->
+            while (c.moveToNext()) {
+                count++
+                bytes += c.getLong(0)
+            }
+        }
+        count to bytes
+    }
+
     /**
      * Of [ids], the videos still in TikTok Downloads and not in the trash. Queries the collection:
      * a query on a single item's URI also returns it while it is in the trash.
