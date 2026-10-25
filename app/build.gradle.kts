@@ -6,14 +6,14 @@ plugins {
 
 android {
     namespace = "app.sharedclips"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.sharedclips"
         minSdk = 30
-        targetSdk = 35
-        versionCode = 7
-        versionName = "0.5.0"
+        targetSdk = 36
+        versionCode = 8
+        versionName = "0.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

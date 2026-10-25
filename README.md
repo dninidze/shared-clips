@@ -43,7 +43,7 @@ keystore's path. Keep the keystore out of the repository; with Play App Signing 
 
 
 Open the folder in Android Studio (Ladybug or newer) and run `app`. Min SDK 30 (Android 11; moving another
-app's videos needs MediaStore write requests or All files access, which Android 10 lacks), target SDK 35.
+app's videos needs MediaStore write requests or All files access, which Android 10 lacks), target SDK 36.
 Android Studio generates the Gradle wrapper on first sync; from the command line, run `gradle wrapper` once.
 Debug builds are signed with the checked-in `app/debug.keystore`, so every CI APK installs over the previous one.
 
