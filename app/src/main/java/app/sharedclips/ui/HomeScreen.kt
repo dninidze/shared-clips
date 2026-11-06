@@ -1,6 +1,7 @@
 package app.sharedclips.ui
 
 import android.graphics.Bitmap
+import android.os.Build
 import android.text.format.Formatter
 import android.util.Size
 import androidx.compose.foundation.Image
@@ -8,6 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,25 +25,47 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import app.sharedclips.BuildConfig
 import app.sharedclips.HomeState
 import app.sharedclips.data.CleanupMode
+import app.sharedclips.data.CleanupSettings
 import app.sharedclips.data.ScannedVideo
 import app.sharedclips.detect.Verdict
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import app.sharedclips.R
+import app.sharedclips.ui.theme.Ink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -49,46 +75,292 @@ fun HomeScreen(
     onScan: () -> Unit,
     onModeChange: (CleanupMode) -> Unit,
     onCleanUp: () -> Unit,
+    onAutoMoveChange: (Boolean) -> Unit,
+    onDeleteAfterChange: (Int) -> Unit,
+    onRequestManageMedia: () -> Unit,
+    onRequestAllFilesAccess: () -> Unit,
+    onRequestUnrestricted: () -> Unit,
+    onRequestKeepWhenUnused: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenAppInfo: () -> Unit,
+    onShareLog: () -> Unit,
+    onClearLog: () -> Unit,
 ) {
-    val context = LocalContext.current
     Scaffold { padding ->
-        Column(
+        LazyColumn(
             Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Shared Clips", style = MaterialTheme.typography.headlineMedium)
-            when {
-                state.scanning -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text("Scanning your Camera folder")
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_mark),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text("ClipSweep", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "v${state.versionName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                state.videos.isEmpty() -> Text("No TikTok videos in your Camera folder.")
-                else -> Text(
-                    "${state.videos.size} TikTok videos, " +
-                        Formatter.formatShortFileSize(context, state.totalBytes),
-                    style = MaterialTheme.typography.titleMedium,
+            }
+
+            item { StatusCard(state, onCleanUp) }
+
+            item {
+                AutomationSection(
+                    state = state,
+                    onAutoMoveChange = onAutoMoveChange,
+                    onDeleteAfterChange = onDeleteAfterChange,
+                    onRequestManageMedia = onRequestManageMedia,
+                    onRequestAllFilesAccess = onRequestAllFilesAccess,
+                    onRequestUnrestricted = onRequestUnrestricted,
+                    onRequestKeepWhenUnused = onRequestKeepWhenUnused,
+                    onRequestNotifications = onRequestNotifications,
+                    onOpenAppInfo = onOpenAppInfo,
                 )
             }
-            state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
-            ModePicker(state.mode, onModeChange)
+            item { HorizontalDivider() }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onCleanUp, enabled = state.videos.isNotEmpty()) {
-                    Text(if (state.mode == CleanupMode.DELETE) "Delete all" else "Move all")
+            item {
+                when {
+                    state.scanning -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Scanning your Camera folder")
+                    }
+                    else -> Text("In your Camera folder", style = MaterialTheme.typography.titleMedium)
                 }
+            }
+            state.message?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
+
+            item { ModePicker(state.mode, onModeChange) }
+
+            item {
                 OutlinedButton(onClick = onScan) { Text("Scan again") }
             }
 
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.videos, key = { it.id }) { VideoRow(it) }
+            items(state.videos, key = { it.id }) { VideoRow(it) }
+
+            item { HorizontalDivider() }
+            item {
+                var showLog by rememberSaveable { mutableStateOf(false) }
+                if (showLog) {
+                    ActivityLogSection(state.log, onShareLog, onClearLog)
+                } else {
+                    TextButton(onClick = { showLog = true }) { Text("Show activity log") }
+                }
             }
         }
     }
+}
+
+/** The headline: what is waiting in Camera right now, and what is already kept out of the backup. */
+@Composable
+private fun StatusCard(state: HomeState, onCleanUp: () -> Unit) {
+    val context = LocalContext.current
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val waiting = state.videos.size
+            Text(
+                when {
+                    !state.canRead -> "Allow access to your videos to start"
+                    waiting == 0 -> "Camera is clear"
+                    waiting == 1 -> "1 TikTok video in Camera"
+                    else -> "$waiting TikTok videos in Camera"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                when {
+                    waiting > 0 -> Formatter.formatShortFileSize(context, state.totalBytes) +
+                        " your photo backup would upload"
+                    state.autoMove -> "Automatic mode is on: new downloads are handled as they arrive."
+                    else -> "No TikTok downloads waiting to be backed up."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (state.keptCount > 0) {
+                Text(
+                    "${state.keptCount} kept out of backup in TikTok Downloads (" +
+                        Formatter.formatShortFileSize(context, state.keptBytes) + ")",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (waiting > 0) {
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onCleanUp,
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White),
+                ) {
+                    Text(if (state.mode == CleanupMode.DELETE) "Delete all" else "Move all")
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun AutomationSection(
+    state: HomeState,
+    onAutoMoveChange: (Boolean) -> Unit,
+    onDeleteAfterChange: (Int) -> Unit,
+    onRequestManageMedia: () -> Unit,
+    onRequestAllFilesAccess: () -> Unit,
+    onRequestUnrestricted: () -> Unit,
+    onRequestKeepWhenUnused: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenAppInfo: () -> Unit,
+) {
+    val autoDelete = state.deleteAfterDays > 0
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Automatic mode", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (state.hasAllFilesAccess) {
+                        "Moves new TikTok downloads to TikTok Downloads within seconds"
+                    } else {
+                        "Notifies you about new TikTok downloads; one tap moves them to TikTok Downloads"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = state.autoMove, onCheckedChange = onAutoMoveChange)
+        }
+
+        Text("Delete from TikTok Downloads after", style = MaterialTheme.typography.titleMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CleanupSettings.DELETE_AFTER_OPTIONS.forEach { days ->
+                FilterChip(
+                    selected = days == state.deleteAfterDays,
+                    onClick = { onDeleteAfterChange(days) },
+                    label = { Text(if (days == 0) "Never" else if (days == 1) "1 day" else "$days days") },
+                )
+            }
+        }
+
+        if (state.autoMove || autoDelete) {
+            AccessHints(
+                state, onRequestManageMedia, onRequestAllFilesAccess, onRequestUnrestricted,
+                onRequestKeepWhenUnused, onRequestNotifications, onOpenAppInfo,
+            )
+        }
+    }
+}
+
+/** What the user still has to allow for automatic mode and auto-delete to work, and why. */
+@Composable
+private fun AccessHints(
+    state: HomeState,
+    onRequestManageMedia: () -> Unit,
+    onRequestAllFilesAccess: () -> Unit,
+    onRequestUnrestricted: () -> Unit,
+    onRequestKeepWhenUnused: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenAppInfo: () -> Unit,
+) {
+    val autoDelete = state.deleteAfterDays > 0
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val what = when {
+            state.autoMove && autoDelete -> "new videos are moved and old ones deleted"
+            state.autoMove -> "new videos are moved"
+            else -> "old videos are deleted"
+        }
+        if (state.hasAllFilesAccess && state.runsUnrestricted) {
+            Hint("Fully automatic: $what without a tap.", highlight = true)
+        } else if (state.hasAllFilesAccess) {
+            Hint("No tap needed: $what by themselves.", highlight = true)
+        } else {
+            if (BuildConfig.ALL_FILES_ACCESS) {
+                Hint(
+                    "Android only lets an app move or delete another app's videos in the background with " +
+                        "\"All files access\". Without it, you get a notification and one tap does it."
+                )
+                OutlinedButton(onClick = onRequestAllFilesAccess) { Text("Allow all files access") }
+            } else {
+                Hint("When there is something to do, you get a notification and one tap does it.")
+            }
+            if (!state.notificationsOn) {
+                val missed = when {
+                    state.autoMove && autoDelete ->
+                        "new videos stay in Camera until you open the app, and old ones are not deleted"
+                    state.autoMove -> "new videos stay in Camera until you open the app"
+                    else -> "old videos in TikTok Downloads are not deleted"
+                }
+                Hint("Notifications are off for this app, so $missed.", warning = true)
+                OutlinedButton(onClick = onRequestNotifications) { Text("Turn on notifications") }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !state.canManageMedia) {
+                Hint("Allow \"Media management\" so that tap goes through without a confirmation popup.")
+                OutlinedButton(onClick = onRequestManageMedia) { Text("Allow media management") }
+            }
+        }
+        if (!state.runsUnrestricted) {
+            Hint(
+                "Android holds back background work for apps you rarely open, so this can be late by " +
+                    "hours. Allow unrestricted battery use to have it happen right away." +
+                    if (BuildConfig.ALL_FILES_ACCESS) "" else " In App info, open Battery usage and pick Unrestricted."
+            )
+            OutlinedButton(onClick = onRequestUnrestricted) { Text("Allow background use") }
+        }
+        if (!state.keptWhenUnused) {
+            Hint(
+                "Android pauses apps you haven't opened for a few months and takes back their " +
+                    "permissions. Turn off \"Pause app activity if unused\" to keep this running."
+            )
+            OutlinedButton(onClick = onRequestKeepWhenUnused) { Text("Keep running when unused") }
+        }
+        if (Build.MANUFACTURER.lowercase() in AUTO_LAUNCH_VENDORS) {
+            Hint(
+                "On ${Build.MANUFACTURER} phones, also turn on auto launch and background activity for " +
+                    "ClipSweep (App info > Battery usage). Otherwise this pauses after a restart until " +
+                    "you open the app."
+            )
+            OutlinedButton(onClick = onOpenAppInfo) { Text("Open app info") }
+        }
+    }
+}
+
+/** Phones whose own background killer also stops apps from starting after a reboot. */
+private val AUTO_LAUNCH_VENDORS = setOf("oneplus", "oppo", "realme", "xiaomi", "redmi", "poco", "vivo", "huawei", "honor")
+
+@Composable
+private fun Hint(text: String, highlight: Boolean = false, warning: Boolean = false) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = when {
+            warning -> MaterialTheme.colorScheme.error
+            highlight -> MaterialTheme.colorScheme.primary
+            else -> Color.Unspecified
+        },
+    )
 }
 
 @Composable
@@ -154,7 +426,12 @@ private fun VideoRow(video: ScannedVideo) {
             Text(video.displayName, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
             Text(
                 Formatter.formatShortFileSize(context, video.sizeBytes) +
-                    if (video.detection.verdict == Verdict.UNSURE) " · not sure" else "",
+                    (if (video.detection.verdict == Verdict.UNSURE) " · not sure" else "") +
+                    when {
+                        video.isSettled() -> ""
+                        video.isAbandoned() -> " · empty, save failed"
+                        else -> " · still saving"
+                    },
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
@@ -165,3 +442,46 @@ private fun VideoRow(video: ScannedVideo) {
         }
     }
 }
+
+@Composable
+private fun ActivityLogSection(log: List<String>, onShare: () -> Unit, onClear: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Activity log", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "What the app saw and did. Share it if something goes wrong.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onShare, enabled = log.isNotEmpty()) { Text("Share log") }
+            OutlinedButton(onClick = onClear, enabled = log.isNotEmpty()) { Text("Clear") }
+        }
+        if (log.isEmpty()) {
+            Text("Nothing yet.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            Text(
+                newestFirst(log.takeLast(LOG_LINES_SHOWN)).joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+/**
+ * Reverses the order of log entries but not the lines within one: an entry's detail lines are
+ * indented after the timestamp and stay under their first line.
+ */
+private fun newestFirst(lines: List<String>): List<String> {
+    val entries = mutableListOf<MutableList<String>>()
+    for (line in lines) {
+        val isDetail = line.length > STAMP_LENGTH && line[STAMP_LENGTH] == ' '
+        if (isDetail && entries.isNotEmpty()) entries.last().add(line) else entries.add(mutableListOf(line))
+    }
+    return entries.reversed().flatten()
+}
+
+private const val LOG_LINES_SHOWN = 40
+
+/** "MM-dd HH:mm:ss " in front of every activity log line. */
+private const val STAMP_LENGTH = 15
