@@ -17,6 +17,16 @@ import app.sharedclips.action.MediaMover
  */
 object AppAccess {
 
+    /** The app may see videos in Camera (READ_MEDIA_VIDEO, or storage access before Android 13). */
+    fun canReadVideos(context: Context): Boolean = has(
+        context,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_VIDEO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        },
+    )
+
     /** Notifications can actually be shown: permission (Android 13+), app switch and channel. */
     fun canNotify(context: Context): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

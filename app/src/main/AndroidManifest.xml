@@ -16,14 +16,8 @@
         tools:ignore="ProtectedPermissions" />
     <!-- Media management only skips the confirmation dialog for apps that also hold this -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
-    <!-- Lets the user exempt the app from battery optimization, so Android does not hold back the
-         automatic jobs of an app that is rarely opened. -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- Optional "All files access": the only way a background job can move or trash another app's
-         videos without a tap. Fine for a sideloaded APK; Google Play does not allow it for this use. -->
-    <uses-permission
-        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
+    <!-- All files access and the battery-exemption request are in src/full: Google Play does not
+         allow them for this kind of app. -->
 
     <!-- Android 14+ hides which app saved a video (OWNER_PACKAGE_NAME) from apps targeting 34+,
          unless that app is visible to us. Keep in sync with TikTokDetector's package lists. -->
@@ -45,7 +39,9 @@
     <application
         android:name=".SharedClipsApp"
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.SharedClips">
         <activity

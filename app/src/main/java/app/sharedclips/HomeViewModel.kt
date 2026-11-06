@@ -33,6 +33,7 @@ data class HomeState(
     val mode: CleanupMode = CleanupMode.MOVE_TO_FOLDER,
     val autoMove: Boolean = false,
     val deleteAfterDays: Int = 0,
+    val canRead: Boolean = false,
     val canManageMedia: Boolean = false,
     val hasAllFilesAccess: Boolean = false,
     val notificationsOn: Boolean = true,
@@ -41,6 +42,10 @@ data class HomeState(
     val request: CleanupRequest? = null,
     val log: List<String> = emptyList(),
     val versionName: String = "",
+    /** Videos already in TikTok Downloads, so out of the backed-up Camera folder. */
+    val keptCount: Int = 0,
+    val keptBytes: Long = 0,
+    val onboarded: Boolean = true,
 ) {
     val totalBytes: Long get() = videos.sumOf { it.sizeBytes }
 }
@@ -55,6 +60,7 @@ class HomeViewModel(app: Application, private val saved: SavedStateHandle) : And
             mode = settings.mode,
             autoMove = settings.autoMove,
             deleteAfterDays = settings.deleteAfterDays,
+            onboarded = settings.onboarded,
             log = ActivityLog.read(app),
             versionName = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }
                 .getOrNull().orEmpty(),
@@ -100,6 +106,7 @@ class HomeViewModel(app: Application, private val saved: SavedStateHandle) : And
         val app = getApplication<Application>()
         _state.update {
             it.copy(
+                canRead = AppAccess.canReadVideos(app),
                 canManageMedia = mover.canManageMedia(),
                 hasAllFilesAccess = mover.hasAllFilesAccess(),
                 notificationsOn = AppAccess.canNotify(app),
@@ -118,7 +125,16 @@ class HomeViewModel(app: Application, private val saved: SavedStateHandle) : And
     fun scan(clearMessage: Boolean = true) {
         _state.update { it.copy(scanning = true, message = if (clearMessage) null else it.message) }
         scanJob?.cancel()
-        scanJob = viewModelScope.launch { showScan(scanner.scanCameraFolder()) }
+        scanJob = viewModelScope.launch {
+            showScan(scanner.scanCameraFolder())
+            val (count, bytes) = scanner.downloadsSummary()
+            _state.update { it.copy(keptCount = count, keptBytes = bytes) }
+        }
+    }
+
+    fun finishOnboarding() {
+        settings.onboarded = true
+        _state.update { it.copy(onboarded = true) }
     }
 
     /** MediaStore changed while the screen is open: refresh once the changes calm down. */

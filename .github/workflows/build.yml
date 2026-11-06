@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   build:
-    name: Unit tests + APK
+    name: Unit tests + APKs + Play bundle
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,15 +20,45 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.10.2"
+          gradle-version: "8.11.1"
       - name: Unit tests
-        run: gradle :app:testDebugUnitTest --stacktrace
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:testFullDebugUnitTest :app:testPlayDebugUnitTest --stacktrace
+      - name: Build debug APKs
+        run: gradle :app:assembleFullDebug :app:assemblePlayDebug --stacktrace
+      # Signed with the upload key when the RELEASE_KEYSTORE_BASE64 secret is set, unsigned otherwise.
+      # Either way this checks the release build (R8 shrinking) still works.
+      - name: Build Play release bundle
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            export RELEASE_KEYSTORE="$RUNNER_TEMP/upload.jks"
+          fi
+          gradle :app:bundlePlayRelease --stacktrace
+      # The privacy policy says the app has no internet access, so the Play build must not gain it.
+      - name: Check the Play build leaves out restricted permissions and internet access
+        run: |
+          manifest=app/build/intermediates/merged_manifests/playRelease/processPlayReleaseManifest/AndroidManifest.xml
+          test -f "$manifest" || manifest=$(find app/build/intermediates -path "*playRelease*" -name AndroidManifest.xml | head -n 1)
+          test -f "$manifest"
+          echo "Checking $manifest"
+          ! grep -E "MANAGE_EXTERNAL_STORAGE|REQUEST_IGNORE_BATTERY_OPTIMIZATIONS|android.permission.INTERNET" "$manifest"
       - uses: actions/upload-artifact@v4
         with:
-          name: shared-clips-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: clipsweep-full-debug-apk
+          path: app/build/outputs/apk/full/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipsweep-play-debug-apk
+          path: app/build/outputs/apk/play/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipsweep-play-release-bundle
+          path: app/build/outputs/bundle/playRelease/*.aab
 
   emulator:
     name: Device tests (API ${{ matrix.api-level }})
@@ -37,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api-level: [31, 34]
+        api-level: [31, 34, 36]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -46,14 +76,14 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.10.2"
+          gradle-version: "8.11.1"
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Build app, tests and fake TikTok
-        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest :faketiktok:assembleDebug --stacktrace
+        run: gradle :app:assembleFullDebug :app:assembleFullDebugAndroidTest :faketiktok:assembleDebug --stacktrace
       - name: Run device tests on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -69,9 +99,9 @@ jobs:
           script: |
             adb install -r faketiktok/build/outputs/apk/debug/faketiktok-debug.apk
             adb logcat -c || true
-            gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=app.sharedclips.AllFilesAccessTest --stacktrace || touch tests-failed
+            gradle :app:connectedFullDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=app.sharedclips.AllFilesAccessTest --stacktrace || touch tests-failed
             mkdir -p test-results && cp -r app/build/outputs/androidTest-results/connected test-results/notification || true
-            gradle :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=app.sharedclips.AllFilesAccessTest --stacktrace || touch tests-failed
+            gradle :app:connectedFullDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=app.sharedclips.AllFilesAccessTest --stacktrace || touch tests-failed
             cp -r app/build/outputs/androidTest-results/connected test-results/all-files-access || true
             adb logcat -d > logcat.txt || true
             adb shell dumpsys jobscheduler > jobscheduler.txt || true
